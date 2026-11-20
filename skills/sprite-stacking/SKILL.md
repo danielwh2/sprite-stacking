@@ -28,7 +28,7 @@ Pick a tier:
 
 - **Chunky retro:** 15-20 slices, about 25×48 px. Bold silhouettes, 3-4 px stripes, shown at 8-10x.
 - **Detailed hi-bit:** 26-44 slices, 36×72 to 46×107 px. Holds vents, logos, spoked rims, glass reflections, raised spoilers.
-- **Showcase / 1080p video:** 36-56 slices, 30×30 to 148×148 px, shown at 4-6x integer scale. Avoids chunky silhouette stepping and rotational wobble when tiny sprites are blown up to 7-9x on HD video.
+- **Showcase / 1080p video:** 36-56 slices, 30×30 to 148×148 px, shown at 4-6x integer scale. Avoids chunky silhouette stepping and rotational wobble when tiny sprites are blown up to 7-9x on HD video. Architectural micro-details that read cleanly across 360° (shutters, flower boxes, balcony railings, roof moss, lily pads, lantern posts, cliff tendrils, waterfalls) elevate dioramas without breaking palette discipline.
 
 Then take the first source that applies.
 
@@ -119,6 +119,7 @@ Do not guess these:
 - **Heading:** the sheet's front points down (+y), so `turn = atan2(vy, vx) - PI / 2`. For anything that reverses, drive `turn` from a stored heading, not raw velocity.
 - **Y-sort whole stacks by ground point.** Never interleave slices of two objects.
 - **Bake static stacks** into plain sprites at load time. 200 trees × 30 slices is 6,000 draws a frame.
+- **Animate entrances with slices, not opacity fades.** Fading a stack in mid-air looks flat; grow grounded props bottom-to-top via per-slice `lifts` (slice-bloom with a gentle spring settle and ground ring), and glide airborne/waterborne stacks (clouds, boats) in along their travel arc. Never blur crisp stacks with `defocus` cuts in video — use continuous camera moves instead.
 
 Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or Phaser. `scripts/viewer.html` is the complete web reference: buffer, outline, orbit, scan, exploded, export.
 
@@ -148,4 +149,5 @@ When a stack comes out wrong, fix it, then fix the cause where it can't recur: c
 | 2026-11-20 | Quantizing bobbing, orbiting, or child-prop projection to art-pixel steps (`Math.round(...) * scale`) creates jarring multi-pixel jumps at 60 fps | Keep motion and projection continuous in screen pixels; snap once at the final 1-screen-px blit with integer `scale` | Rule |
 | 2026-11-20 | Tiny 12–24px props scaled 7–9× on 1080p video look overly chunky and exaggerate nearest-neighbor rotation stepping | Build denser strips (36–56 slices, 30–148px) and render at 4–6× integer scale for showcase video | Rule |
 | 2026-11-20 | Updating a strip's slice count without updating the loader's count silently slices mid-frame | Validate `sheet.width % count === 0` and slice width at load time | Rule |
+| 2026-11-20 | Fading stacks in mid-air or using `defocus` cuts blurs/flattens pixel-art dioramas | Bloom grounded props bottom-to-top via per-slice `lifts`, glide orbiters in along their arc, and use continuous camera moves | Rule |
 
