@@ -991,80 +991,215 @@ function makeProceduralVolume(w, h, n, fillFn) {
 }
 
 const PROCEDURAL_PROPS = {
-  // Multi-tier stacked pixel pine tree
-  pine: makeProceduralVolume(14, 14, 22, (put) => {
-    const cx = 6.5, cy = 6.5;
-    for (let z = 0; z < 6; z++) {
-      for (let y = 5; y <= 8; y++) for (let x = 5; x <= 8; x++) {
-        if ((x - cx) ** 2 + (y - cy) ** 2 <= 2.4) put(z, y, x, 114, 74, 48);
+  // Hand-sculpted organic pine tree: roots, textured bark trunk, irregular hue-shifted boughs (deep teal shadow -> emerald mid -> warm lime tip)
+  pine: makeProceduralVolume(18, 18, 28, (put) => {
+    const cx = 8.5, cy = 8.5;
+    // Flared roots & gnarled bark trunk
+    for (let z = 0; z < 8; z++) {
+      const r = z === 0 ? 2.6 : (z === 1 ? 2.0 : 1.5);
+      for (let y = 5; y <= 12; y++) for (let x = 5; x <= 12; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d <= r) {
+          const grain = ((x * 3 + y * 5 + z * 7) & 3) === 0;
+          put(z, y, x, grain ? 84 : 118, grain ? 52 : 76, grain ? 38 : 50);
+        }
       }
     }
-    const tiers = [[4, 11, 5.6], [9, 16, 4.4], [14, 20, 3.0], [18, 22, 1.7]];
-    for (const [z0, z1, rMax] of tiers) {
+    // 5 irregular overlapping evergreen bough tiers with hue-shifted depth
+    const tiers = [
+      [5, 12, 7.6, 0.0],
+      [10, 17, 6.2, 0.7],
+      [15, 21, 4.8, 1.4],
+      [19, 25, 3.2, 2.1],
+      [23, 28, 1.8, 2.8],
+    ];
+    for (const [z0, z1, rMax, angOff] of tiers) {
       for (let z = z0; z < z1; z++) {
         const frac = (z - z0) / Math.max(1, z1 - z0);
-        const rad = rMax * (1 - frac * 0.72);
-        for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
-          const d = Math.hypot(x - cx, y - cy);
-          if (d <= rad) {
-            const hi = ((x + y + z) & 1) ? 14 : 0;
-            put(z, y, x, 38 + hi, 116 + z * 2 + hi, 62 + hi);
+        const baseR = rMax * (1 - frac * 0.68);
+        for (let y = 0; y < 18; y++) for (let x = 0; x < 18; x++) {
+          const dx = x - cx, dy = y - cy;
+          const d = Math.hypot(dx, dy);
+          const ang = Math.atan2(dy, dx);
+          // 5-lobe organic branch tips
+          const lobe = 1 + 0.18 * Math.cos(ang * 5 + angOff);
+          if (d <= baseR * lobe) {
+            const isEdge = d > baseR * lobe - 1.3;
+            const isTopTip = frac > 0.55 || z >= 25;
+            const speckle = ((x * 11 + y * 7 + z * 5) & 3) === 0;
+            if (isTopTip && (isEdge || speckle)) {
+              put(z, y, x, 92, 178, 86); // warm sunlit needle tip
+            } else if (isEdge) {
+              put(z, y, x, 46, 134, 72); // rich emerald mid
+            } else {
+              put(z, y, x, 24, 84, 66);  // deep cool-teal inner shade
+            }
           }
         }
       }
     }
   }),
 
-  // Streetlamp with glowing warm lantern head
-  lamp: makeProceduralVolume(9, 9, 24, (put) => {
-    for (let z = 0; z < 3; z++) for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) put(z, y, x, 64, 74, 92);
-    for (let z = 3; z < 19; z++) put(z, 4, 4, 82, 94, 114);
-    for (let z = 19; z < 23; z++) {
-      for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) {
-        const isCore = (z === 20 || z === 21) && (x === 4 || y === 4);
-        if (isCore) put(z, y, x, 255, 232, 140, 1);
-        else put(z, y, x, 54, 62, 78);
-      }
-    }
-    put(23, 4, 4, 54, 62, 78);
-  }),
-
-  // Glowing cyberpunk neon vending kiosk
-  kiosk: makeProceduralVolume(12, 10, 18, (put) => {
-    for (let z = 0; z < 17; z++) {
-      for (let y = 2; y <= 7; y++) for (let x = 2; x <= 9; x++) {
-        const isFront = y === 7 && x >= 3 && x <= 8 && z >= 5 && z <= 13;
-        const isHeader = y === 7 && x >= 3 && x <= 8 && z >= 14 && z <= 15;
-        if (isHeader) put(z, y, x, 255, 76, 178, 1);
-        else if (isFront) put(z, y, x, 80, 236, 255, 1);
-        else put(z, y, x, 46, 56, 78);
-      }
-    }
-    for (let y = 1; y <= 8; y++) for (let x = 1; x <= 10; x++) put(17, y, x, 72, 86, 112);
-  }),
-
-  // Reflective traffic bollard
-  bollard: makeProceduralVolume(6, 6, 8, (put) => {
-    for (let z = 0; z < 7; z++) {
-      for (let y = 2; y <= 3; y++) for (let x = 2; x <= 3; x++) {
-        if (z === 5) put(z, y, x, 255, 130, 50, 1);
-        else put(z, y, x, 58, 66, 80);
-      }
-    }
-  }),
-
-  // Mossy meadow rock
-  rock: makeProceduralVolume(10, 10, 7, (put) => {
-    for (let z = 0; z < 7; z++) {
-      const r = 4.2 - z * 0.55;
-      for (let y = 1; y < 9; y++) for (let x = 1; x < 9; x++) {
-        const d = Math.hypot((x - 4.5) * 0.9, (y - 4.5) * 1.15);
-        if (d <= r) {
-          if (z >= 4 && ((x + y) & 1)) put(z, y, x, 86, 140, 78);
-          else put(z, y, x, 128 + z * 5, 134 + z * 5, 146 + z * 4);
+  // Curved gooseneck Tokyo/cyberpunk streetlamp: cast-iron pedestal, ribbed post, overhanging curved arm, warm amber glass lantern + cap
+  lamp: makeProceduralVolume(14, 14, 30, (put) => {
+    const px = 4, py = 7;
+    // Octagonal cast-iron base pedestal
+    for (let z = 0; z < 4; z++) {
+      const r = z < 2 ? 2.4 : 1.7;
+      for (let y = py - 2; y <= py + 2; y++) for (let x = px - 2; x <= px + 2; x++) {
+        if (Math.hypot(x - px, y - py) <= r) {
+          put(z, y, x, z === 2 ? 96 : 56, z === 2 ? 108 : 66, z === 2 ? 128 : 84);
         }
       }
     }
+    // Slender fluted iron post with mid decorative collar
+    for (let z = 4; z < 23; z++) {
+      put(z, py, px, 68, 80, 100);
+      put(z, py, px + 1, 52, 62, 80);
+      if (z === 13) {
+        put(z, py - 1, px, 96, 112, 134);
+        put(z, py + 1, px, 96, 112, 134);
+      }
+    }
+    // Curved gooseneck overhanging arm reaching toward +X (over the street!)
+    put(23, py, px + 1, 78, 92, 114);
+    put(24, py, px + 2, 78, 92, 114);
+    put(25, py, px + 3, 86, 100, 122);
+    put(26, py, px + 4, 86, 100, 122);
+    put(26, py, px + 5, 86, 100, 122);
+    put(26, py, px + 6, 86, 100, 122);
+    put(25, py, px + 7, 74, 86, 108);
+    // Lantern hood + glowing warm amber glass globe + glowing bottom lens
+    const lx = px + 7, ly = py;
+    for (let y = ly - 2; y <= ly + 2; y++) for (let x = lx - 2; x <= lx + 2; x++) {
+      const d = Math.hypot(x - lx, y - ly);
+      if (d <= 2.2) put(24, y, x, 46, 54, 70); // dark metal shade hood
+      if (d <= 1.2) put(25, y, x, 64, 76, 94); // hood finial
+    }
+    for (let z = 21; z <= 23; z++) {
+      for (let y = ly - 1; y <= ly + 1; y++) for (let x = lx - 1; x <= lx + 1; x++) {
+        const isBrightCore = z === 22 && (x === lx || y === ly);
+        put(z, y, x, 255, isBrightCore ? 244 : 210, isBrightCore ? 170 : 108, 1);
+      }
+    }
+    put(20, ly, lx, 255, 224, 130, 1);
+  }),
+
+  // Detailed Japanese/Cyberpunk glowing neon vending machine: magenta neon header, colorful drink rows, glowing cyan keypad, dark chute, striped awning
+  kiosk: makeProceduralVolume(16, 12, 24, (put) => {
+    for (let z = 0; z < 21; z++) {
+      for (let y = 2; y <= 8; y++) for (let x = 2; x <= 13; x++) {
+        const isFront = y === 8;
+        const isSideTrim = (x === 2 || x === 13) || z === 0 || z === 20;
+        if (isFront && !isSideTrim) {
+          if (z >= 17 && z <= 19 && x >= 3 && x <= 12) {
+            // Hot pink / magenta neon header sign with bright white-pink glyph pixels
+            const glyph = (z === 18) && ((x === 4 || x === 5 || x === 7 || x === 9 || x === 11));
+            put(z, y, x, 255, glyph ? 210 : 72, glyph ? 240 : 178, 1);
+          } else if (z >= 8 && z <= 15 && x >= 3 && x <= 12) {
+            // Illuminated glass showcase with 3 shelves of colorful pixel drink cans!
+            if (z === 10 || z === 13) {
+              put(z, y, x, 200, 245, 255, 1); // glowing shelf divider
+            } else if ((x & 1) === 1) {
+              const palette = [
+                [255, 92, 92],   // red soda
+                [90, 240, 255],  // cyan Ramune
+                [255, 222, 88],  // lemon tea
+                [120, 255, 145], // melon soda
+                [255, 125, 220], // peach
+              ];
+              const c = palette[(x + z) % palette.length];
+              put(z, y, x, c[0], c[1], c[2], 1);
+            } else {
+              put(z, y, x, 135, 232, 255, 1); // cool fluorescent glass backing
+            }
+          } else if (z >= 5 && z <= 6 && x >= 10 && x <= 12) {
+            // Glowing cyan coin slot / button panel
+            put(z, y, x, 70, 242, 255, 1);
+          } else if (z >= 2 && z <= 4 && x >= 4 && x <= 9) {
+            // Recessed dark pickup chute
+            put(z, y, x, 18, 22, 34);
+          } else {
+            put(z, y, x, 54, 66, 92);
+          }
+        } else {
+          // Metallic housing with subtle horizontal panel ribs & neon side accent strip
+          if ((x === 2 || x === 13) && y === 7 && z >= 8 && z <= 19) {
+            put(z, y, x, 64, 224, 255, 1); // cyan side edge-glow
+          } else {
+            const rib = (z === 6 || z === 14) ? -10 : 0;
+            put(z, y, x, 46 + rib, 58 + rib, 82 + rib);
+          }
+        }
+      }
+    }
+    // Sloped corrugated awning canopy overhanging the front
+    for (let x = 1; x <= 14; x++) {
+      const stripe = (x & 1) === 0;
+      const ar = stripe ? 225 : 240, ag = stripe ? 62 : 244, ab = stripe ? 112 : 252;
+      for (let y = 1; y <= 9; y++) put(21, y, x, 68, 82, 108);
+      for (let y = 8; y <= 10; y++) put(22 - (y - 8), y, x, ar, ag, ab);
+    }
+  }),
+
+  // Street bollard with steel dome top and glowing amber reflective safety band
+  bollard: makeProceduralVolume(8, 8, 11, (put) => {
+    for (let z = 0; z < 10; z++) {
+      const r = z === 0 ? 2.4 : (z === 9 ? 1.2 : 1.7);
+      for (let y = 1; y <= 6; y++) for (let x = 1; x <= 6; x++) {
+        if (Math.hypot(x - 3.5, y - 3.5) <= r) {
+          if (z === 6 || z === 7) put(z, y, x, 255, 152, 46, 1);
+          else if (z === 9) put(z, y, x, 130, 146, 170);
+          else put(z, y, x, 54, 64, 82);
+        }
+      }
+    }
+  }),
+
+  // Sculpted faceted mossy boulder with lush green moss cap and tiny colorful wildflowers
+  rock: makeProceduralVolume(14, 14, 10, (put) => {
+    for (let z = 0; z < 10; z++) {
+      const rx = 5.4 - z * 0.52;
+      const ry = 4.6 - z * 0.44;
+      for (let y = 1; y < 13; y++) for (let x = 1; x < 13; x++) {
+        const dx = (x - 6.4) / Math.max(0.5, rx);
+        const dy = (y - 6.6) / Math.max(0.5, ry);
+        const warp = 0.14 * Math.sin(x * 0.9 + y * 0.6);
+        if (dx * dx + dy * dy + warp <= 1.0) {
+          const isMoss = z >= 5 && (x + y * 2) % 3 !== 0;
+          const isFlower = z === 7 && ((x === 5 && y === 6) || (x === 8 && y === 7));
+          if (isFlower) {
+            put(z, y, x, x === 5 ? 255 : 255, x === 5 ? 228 : 138, x === 5 ? 92 : 190);
+          } else if (isMoss) {
+            const hi = ((x + y) & 1) ? 18 : 0;
+            put(z, y, x, 72 + hi, 154 + hi, 74 + hi);
+          } else {
+            const shade = z * 6 + (((x ^ y) & 1) ? 8 : 0);
+            put(z, y, x, 108 + shade, 116 + shade, 130 + shade);
+          }
+        }
+      }
+    }
+  }),
+
+  // Cozy warm wooden trail lantern post for Meadow Island
+  meadowLamp: makeProceduralVolume(11, 11, 24, (put) => {
+    const px = 5, py = 5;
+    // Stone base
+    for (let z = 0; z < 3; z++) for (let y = 4; y <= 6; y++) for (let x = 4; x <= 6; x++) put(z, y, x, 120, 126, 138);
+    // Warm cedar wood post
+    for (let z = 3; z < 19; z++) put(z, py, px, 136, 88, 54);
+    // Cross-arm + hanging glowing warm lantern
+    for (let x = px; x <= px + 3; x++) put(18, py, x, 118, 74, 44);
+    put(19, py, px, 118, 74, 44);
+    put(17, py, px + 3, 62, 68, 78);
+    for (let z = 14; z <= 16; z++) {
+      for (let y = py - 1; y <= py + 1; y++) for (let x = px + 2; x <= px + 4; x++) {
+        const core = (z === 15) || (x === px + 3 && y === py);
+        put(z, y, x, 255, core ? 236 : 196, core ? 148 : 88, 1);
+      }
+    }
+    put(13, py, px + 3, 56, 60, 72);
   }),
 };
 
@@ -1224,121 +1359,221 @@ function drawWeatherOverlay(targetCtx, aw, ah, s, env) {
 function getSceneLayout(sceneName) {
   if (sceneName === "street") {
     return [
-      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: -34, y: -26, rot: 0 },
-      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 34, y: -26, rot: 0 },
-      { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 2, y: -30, rot: 0 },
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: -34, y: -27, rot: 90 },
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 34, y: -27, rot: 90 },
+      { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 2, y: -32, rot: 0 },
       { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: -36, y: 24, rot: 0 },
       { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: 36, y: 24, rot: 0 },
-      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 0, y: 30, rot: 180 },
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 0, y: 31, rot: 270 },
     ];
   }
   // Meadow Island
   return [
-    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -30, y: -22, rot: 0 },
-    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 28, y: -24, rot: 90 },
-    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -24, y: 24, rot: 180 },
-    { key: "rock", vol: PROCEDURAL_PROPS.rock, x: 26, y: 20, rot: 45 },
-    { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 20, y: -10, rot: 0 },
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -32, y: -24, rot: 0 },
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 30, y: -25, rot: 90 },
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -26, y: 26, rot: 180 },
+    { key: "rock", vol: PROCEDURAL_PROPS.rock, x: 28, y: 22, rot: 45 },
+    { key: "meadowLamp", vol: PROCEDURAL_PROPS.meadowLamp, x: 18, y: -15, rot: 120 },
   ];
 }
 
-function drawDioramaGround(targetCtx, aw, ah, cx, cy, s, ca, sa, squash, env, sceneName) {
-  const half = 54;
+// Cached 112x112 pixel-art diorama ground texture (rebuilt only when scene/lighting/weather changes -> <0.1ms/frame draw!)
+const groundTex = { key: "", canvas: document.createElement("canvas"), ctx: null };
+groundTex.canvas.width = 112;
+groundTex.canvas.height = 112;
+groundTex.ctx = groundTex.canvas.getContext("2d");
+
+function getDioramaGroundTex(sceneName, env) {
+  const qSnow = Math.round(weather.snowCover * 4);
+  const qWet = Math.round(weather.wetness * 3);
+  const key = `${sceneName}|${state.timeOfDay}|${qSnow}|${qWet}`;
+  if (groundTex.key === key) return groundTex.canvas;
+  groundTex.key = key;
+
+  const W = 112, H = 112, half = 56;
+  const img = groundTex.ctx.createImageData(W, H);
+  const d32 = new Uint32Array(img.data.buffer);
   const wet = weather.wetness;
   const snow = weather.snowCover;
   const nW = env.nightW;
   const sW = env.sunsetW;
 
-  // Draw rotated pixel-art ground plinth / road directly onto a tiny art-pixel grid via canvas transform?
-  // Even crisper: draw rotated polygon with integer art-pixel snapped plinth & road markings!
+  const hash = (x, y) => {
+    let h = (x * 374761393 + y * 668265263) ^ 0x5bf03635;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) & 255;
+  };
+
+  for (let py = 0; py < H; py++) {
+    const wy = py - half;
+    for (let px = 0; px < W; px++) {
+      const wx = px - half;
+      const n = hash(px, py);
+      let r, g, b;
+
+      if (sceneName === "street") {
+        const isSidewalk = wy < -20 || wy >= 20;
+        const isCurb = wy === -20 || wy === -21 || wy === 20 || wy === 21;
+        if (isCurb) {
+          // Crisp beveled concrete curb edge
+          const hi = (wy === -21 || wy === 20) ? 24 : -14;
+          r = lerp(lerp(154, 148, sW), 58, nW) + hi;
+          g = lerp(lerp(164, 140, sW), 70, nW) + hi;
+          b = lerp(lerp(178, 148, sW), 96, nW) + hi;
+        } else if (isSidewalk) {
+          // Tiled concrete paving slabs with dark mortar grid
+          const isSeam = ((px & 7) === 0) || ((py & 7) === 0);
+          const grain = (n & 7) - 3;
+          const tileVar = (((px >> 3) + (py >> 3)) & 1) ? 5 : -4;
+          const delta = isSeam ? -24 : (grain + tileVar);
+          r = lerp(lerp(142, 138, sW), 44, nW) + delta;
+          g = lerp(lerp(152, 130, sW), 54, nW) + delta;
+          b = lerp(lerp(166, 138, sW), 78, nW) + delta;
+        } else {
+          // Textured asphalt road + zebra crosswalk + dashed center line + manhole cover
+          const grain = (n & 15) - 7;
+          r = lerp(lerp(58, 54, sW), 20, nW) + grain * 0.7;
+          g = lerp(lerp(66, 52, sW), 26, nW) + grain * 0.7;
+          b = lerp(lerp(80, 64, sW), 42, nW) + grain * 0.7;
+
+          // Zebra crosswalk near x = -46..-34
+          if (wx >= -46 && wx <= -34 && (Math.abs(wy) % 6) < 3 && Math.abs(wy) < 18) {
+            r = lerp(lerp(222, 228, sW), 116, nW);
+            g = lerp(lerp(226, 206, sW), 126, nW);
+            b = lerp(lerp(232, 192, sW), 148, nW);
+          }
+          // Yellow-gold dashed center lane markers
+          if (wy >= -1 && wy <= 1 && wx > -28 && (((wx + 60) % 18) < 9)) {
+            r = lerp(lerp(245, 250, sW), 210, nW);
+            g = lerp(lerp(205, 185, sW), 165, nW);
+            b = lerp(lerp(75, 70, sW), 72, nW);
+          }
+          // Cast-iron manhole cover at (22, 8)
+          const md = Math.hypot(wx - 22, wy - 8);
+          if (md < 4.5) {
+            const rim = md > 3.2 || ((px + py) & 1) === 0;
+            r = lerp(rim ? 78 : 54, rim ? 38 : 26, nW);
+            g = lerp(rim ? 86 : 60, rim ? 46 : 32, nW);
+            b = lerp(rim ? 98 : 72, rim ? 64 : 46, nW);
+          }
+          // Wet asphalt sheen & puddle darken in rain
+          if (wet > 0) {
+            const puddle = (Math.sin(wx * 0.14) * Math.cos(wy * 0.19) > 0.35);
+            const f = puddle ? (1 - wet * 0.38) : (1 - wet * 0.2);
+            r *= f; g *= f; b *= (puddle ? (1 - wet * 0.1) : f);
+          }
+        }
+        if (snow > 0) {
+          const snAmt = isSidewalk ? snow * 0.92 : snow * 0.55;
+          const snR = lerp(234, 132, nW), snG = lerp(242, 152, nW), snB = lerp(255, 196, nW);
+          r = lerp(r, snR, snAmt); g = lerp(g, snG, snAmt); b = lerp(b, snB, snAmt);
+        }
+      } else {
+        // Meadow Island: winding pebbled dirt trail, dappled multi-tone pixel grass, tiny colorful wildflowers
+        const pathCenter = Math.sin(wx * 0.055) * 6;
+        const distPath = Math.abs(wy - pathCenter);
+        const edgeNoise = ((n & 7) - 3) * 0.45;
+        if (distPath < 10.5 + edgeNoise) {
+          // Warm pebbled dirt path with occasional stone pebbles
+          const isPebble = n > 236;
+          const grain = (n & 15) - 7;
+          if (isPebble) {
+            r = lerp(164, 72, nW); g = lerp(158, 76, nW); b = lerp(150, 92, nW);
+          } else {
+            r = lerp(lerp(194, 198, sW), 74, nW) + grain;
+            g = lerp(lerp(160, 144, sW), 62, nW) + grain;
+            b = lerp(lerp(116, 98, sW), 56, nW) + grain * 0.8;
+          }
+        } else {
+          // Rich dappled grass with blade tufts & wildflowers
+          const tuft = (n & 31) < 5 ? 14 : ((n & 31) > 27 ? -16 : 0);
+          r = lerp(lerp(88, 114, sW), 26, nW) + tuft * 0.7;
+          g = lerp(lerp(158, 126, sW), 62, nW) + tuft;
+          b = lerp(lerp(76, 66, sW), 52, nW) + tuft * 0.5;
+          // Scattered pixel wildflowers (yellow, pink, white)
+          if (n === 17 || n === 113) { r = lerp(255, 175, nW); g = lerp(228, 165, nW); b = lerp(96, 110, nW); }
+          else if (n === 71) { r = lerp(255, 165, nW); g = lerp(138, 96, nW); b = lerp(186, 140, nW); }
+          else if (n === 203) { r = lerp(248, 170, nW); g = lerp(250, 185, nW); b = lerp(255, 215, nW); }
+        }
+        if (snow > 0) {
+          const snAmt = snow * (distPath < 11 ? 0.75 : 0.92);
+          const snR = lerp(236, 136, nW), snG = lerp(244, 156, nW), snB = lerp(255, 200, nW);
+          r = lerp(r, snR, snAmt); g = lerp(g, snG, snAmt); b = lerp(b, snB, snAmt);
+        }
+      }
+
+      // Crisp 1px border edge rim on the floating diorama top
+      if (px === 0 || px === W - 1 || py === 0 || py === H - 1) {
+        r *= 0.68; g *= 0.68; b *= 0.68;
+      }
+      d32[py * W + px] = packABGR(clampByte(r), clampByte(g), clampByte(b), 255);
+    }
+  }
+  groundTex.ctx.putImageData(img, 0, 0);
+  return groundTex.canvas;
+}
+
+function drawDioramaGround(targetCtx, aw, ah, cx, cy, s, ca, sa, squash, env, sceneName) {
+  const half = 56;
+  const nW = env.nightW;
+  const snow = weather.snowCover;
   const proj = (wx, wy, z = 0) => [
     Math.round(cx + (wx * ca - wy * sa)) * s,
     Math.round(cy + (wx * sa + wy * ca) * squash - z) * s,
   ];
 
-  // Plinth sides (floating diorama slab thickness = 9 art px)
-  const slabH = 9;
+  // 1. Multi-layer floating diorama plinth side walls (top turf/curb lip + thick rock/soil slab)
   const corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
   const topPts = corners.map(([x, y]) => proj(x, y, 0));
-  const botPts = corners.map(([x, y]) => proj(x, y, -slabH));
+  const lipPts = corners.map(([x, y]) => proj(x, y, -3));
+  const botPts = corners.map(([x, y]) => proj(x, y, -11));
 
-  // Draw the two front-facing side walls of the diorama plinth
+  const lipColA = sceneName === "street"
+    ? (nW > 0.45 ? "#2e3a56" : "#94a3b8")
+    : (snow > 0.5 ? (nW > 0.45 ? "#92aacf" : "#dce8f8") : (nW > 0.45 ? "#24543d" : "#5ea84f"));
+  const lipColB = sceneName === "street"
+    ? (nW > 0.45 ? "#222b42" : "#77889e")
+    : (snow > 0.5 ? (nW > 0.45 ? "#7a92b8" : "#c6d6ea") : (nW > 0.45 ? "#1a3f30" : "#498a3f"));
   const sideColA = sceneName === "street"
     ? (nW > 0.45 ? "#1b2234" : "#64748b")
-    : (nW > 0.45 ? "#2e2420" : "#8b6343");
+    : (nW > 0.45 ? "#382a24" : "#946846");
   const sideColB = sceneName === "street"
     ? (nW > 0.45 ? "#121726" : "#475569")
-    : (nW > 0.45 ? "#211916" : "#6d4c33");
+    : (nW > 0.45 ? "#261c18" : "#734e34");
+
   for (let i = 0; i < 4; i++) {
     const j = (i + 1) & 3;
-    // Draw only the two front-facing side walls of the floating diorama plinth
     if ((topPts[i][1] + topPts[j][1]) * 0.5 > cy * s) {
+      // Lower soil / concrete foundation
       targetCtx.fillStyle = (i & 1) ? sideColA : sideColB;
+      targetCtx.beginPath();
+      targetCtx.moveTo(lipPts[i][0], lipPts[i][1]);
+      targetCtx.lineTo(lipPts[j][0], lipPts[j][1]);
+      targetCtx.lineTo(botPts[j][0], botPts[j][1]);
+      targetCtx.lineTo(botPts[i][0], botPts[i][1]);
+      targetCtx.closePath();
+      targetCtx.fill();
+      // Upper grass / curb overhanging lip
+      targetCtx.fillStyle = (i & 1) ? lipColA : lipColB;
       targetCtx.beginPath();
       targetCtx.moveTo(topPts[i][0], topPts[i][1]);
       targetCtx.lineTo(topPts[j][0], topPts[j][1]);
-      targetCtx.lineTo(botPts[j][0], botPts[j][1]);
-      targetCtx.lineTo(botPts[i][0], botPts[i][1]);
+      targetCtx.lineTo(lipPts[j][0], lipPts[j][1]);
+      targetCtx.lineTo(lipPts[i][0], lipPts[i][1]);
       targetCtx.closePath();
       targetCtx.fill();
     }
   }
 
-  // Top surface fill (adapts to Time of Day, Rain wetness, and Snow accumulation!)
-  let topR, topG, topB;
-  if (sceneName === "street") {
-    topR = lerp(lerp(66, 60, sW), 24, nW);
-    topG = lerp(lerp(74, 58, sW), 30, nW);
-    topB = lerp(lerp(88, 70, sW), 46, nW);
-    if (wet > 0) { topR *= (1 - wet * 0.28); topG *= (1 - wet * 0.24); topB *= (1 - wet * 0.14); }
-  } else {
-    topR = lerp(lerp(108, 128, sW), 34, nW);
-    topG = lerp(lerp(168, 134, sW), 66, nW);
-    topB = lerp(lerp(92, 76, sW), 56, nW);
-  }
-  if (snow > 0) {
-    const snR = lerp(236, 130, nW), snG = lerp(244, 150, nW), snB = lerp(255, 195, nW);
-    topR = lerp(topR, snR, snow * 0.85);
-    topG = lerp(topG, snG, snow * 0.85);
-    topB = lerp(topB, snB, snow * 0.85);
-  }
-  targetCtx.fillStyle = `rgb(${topR | 0},${topG | 0},${topB | 0})`;
-  targetCtx.beginPath();
-  targetCtx.moveTo(topPts[0][0], topPts[0][1]);
-  targetCtx.lineTo(topPts[1][0], topPts[1][1]);
-  targetCtx.lineTo(topPts[2][0], topPts[2][1]);
-  targetCtx.lineTo(topPts[3][0], topPts[3][1]);
-  targetCtx.closePath();
-  targetCtx.fill();
-
-  // Street sidewalks + dashed center line OR Meadow dirt path
-  const fillQuad = (x0, y0, x1, y1, color) => {
-    const p0 = proj(x0, y0), p1 = proj(x1, y0), p2 = proj(x1, y1), p3 = proj(x0, y1);
-    targetCtx.fillStyle = color;
-    targetCtx.beginPath();
-    targetCtx.moveTo(p0[0], p0[1]); targetCtx.lineTo(p1[0], p1[1]);
-    targetCtx.lineTo(p2[0], p2[1]); targetCtx.lineTo(p3[0], p3[1]);
-    targetCtx.closePath();
-    targetCtx.fill();
-  };
-
-  if (sceneName === "street") {
-    const curbCol = snow > 0.5
-      ? (nW > 0.45 ? "#9ab0d4" : "#eef4ff")
-      : (nW > 0.45 ? "#2d3852" : "#94a3b8");
-    fillQuad(-half, -half, half, -20, curbCol);
-    fillQuad(-half, 20, half, half, curbCol);
-    // Dashed center lane markers
-    const dashCol = nW > 0.45 ? "rgba(255, 224, 120, 0.72)" : "rgba(255, 236, 150, 0.85)";
-    for (let dx = -44; dx <= 34; dx += 18) {
-      fillQuad(dx, -1.5, dx + 9, 1.5, dashCol);
-    }
-  } else {
-    const pathCol = snow > 0.5
-      ? (nW > 0.45 ? "#7a8fb4" : "#dde7f5")
-      : (nW > 0.45 ? "#463a34" : "#c7a97b");
-    fillQuad(-half, -12, half, 12, pathCol);
-  }
+  // 2. Blit cached 112x112 pixel-art ground texture rotated & squashed in one nearest-neighbor drawImage!
+  const tex = getDioramaGroundTex(sceneName, env);
+  targetCtx.save();
+  targetCtx.imageSmoothingEnabled = false;
+  targetCtx.translate(cx * s, cy * s);
+  targetCtx.scale(s, s * squash);
+  targetCtx.rotate(Math.atan2(sa, ca));
+  targetCtx.drawImage(tex, -half, -half, half * 2, half * 2);
+  targetCtx.restore();
 }
 
 function drawSceneFrame() {
@@ -1605,17 +1840,22 @@ function drawDriveFrame() {
     ctx.fillRect(sx * s, sy * s, 2 * s, 2 * s);
   }
 
-  // Draw headlight cones on ground at sunset/night
+  // Draw crisp dual left + right headlight beams on ground at sunset/night
   if (state.lighting && env.emisGlow > 0.1) {
     const fx = Math.cos(drive.heading), fy = Math.sin(drive.heading);
-    ctx.fillStyle = `rgba(255, 240, 175, ${(env.emisGlow * (0.22 + wet * 0.12)).toFixed(2)})`;
-    for (let d = 12; d <= 44; d += 5) {
-      const spread = 3 + d * 0.22;
-      const hx = cx + fx * d;
-      const hy = cy + fy * d * state.squash;
-      const wPx = Math.round(spread * 2);
-      const hPx = Math.max(2, Math.round(spread * 1.1 * state.squash));
-      ctx.fillRect(Math.round(hx - wPx / 2) * s, Math.round(hy - hPx / 2) * s, wPx * s, hPx * s);
+    const rx = -fy, ry = fx;
+    for (const side of [-5, 5]) {
+      for (let d = 14; d <= 48; d += 4) {
+        const tBeam = (d - 14) / 34;
+        const alpha = env.emisGlow * (0.30 + wet * 0.14) * (1 - tBeam * 0.72);
+        ctx.fillStyle = `rgba(255, 242, 182, ${alpha.toFixed(2)})`;
+        const spread = 2 + d * 0.16;
+        const hx = cx + fx * d + rx * side;
+        const hy = cy + (fy * d + ry * side) * state.squash;
+        const wPx = Math.max(2, Math.round(spread * 1.8));
+        const hPx = Math.max(2, Math.round(spread * 1.1 * state.squash));
+        ctx.fillRect(Math.round(hx - wPx / 2) * s, Math.round(hy - hPx / 2) * s, wPx * s, hPx * s);
+      }
     }
   }
 
@@ -1639,16 +1879,16 @@ function drawDriveFrame() {
     const tileX = 128, tileY = 128;
     const tileProps = world === "street"
       ? [
-          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 24, y: -34, rot: 0 },
-          { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 86, y: -36, rot: 0 },
+          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 24, y: -35, rot: 90 },
+          { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 86, y: -38, rot: 0 },
           { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: 56, y: 34, rot: 0 },
-          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 108, y: 36, rot: 180 },
+          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 108, y: 38, rot: 270 },
         ]
       : [
           { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 22, y: 24, rot: 0 },
           { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 92, y: 34, rot: 90 },
           { key: "rock", vol: PROCEDURAL_PROPS.rock, x: 58, y: 88, rot: 30 },
-          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 104, y: 98, rot: 0 },
+          { key: "meadowLamp", vol: PROCEDURAL_PROPS.meadowLamp, x: 104, y: 98, rot: 120 },
         ];
     const baseTx = Math.floor(drive.x / tileX);
     const baseTy = Math.floor(drive.y / tileY);
