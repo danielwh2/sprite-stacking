@@ -48,11 +48,14 @@ Strictly orthographic: zero perspective, zero tilt, zero 3/4 angle. Identical sc
 
 The slicer keeps a voxel only where every view covers it, so for (c):
 
-- Round objects (pots, canopies, domes, wheels seen from above) need a pixel circle in the TOP view. A square TOP carves a box.
+- Round objects (pots, canopies, domes, wheels seen from above) need a pixel circle in the TOP view. A square TOP carves a box. If a round part is narrower than the widest part (a tower on a wide base, a balloon over its basket), carve with `--round` too, or it comes out square.
 - Fins, leaves, wings and any irregular plan need their real outline in the TOP view, or they carve as blocks.
 - The SIDE and FRONT silhouettes set the profile: a rectangle makes a cylinder, so round them for a ball.
 - Wall detail (windows, doors, panel lines) goes in SIDE, FRONT and BACK. Roof detail goes in TOP.
+- Anything that sticks out of a wall (flower box, porch, sign) carves a ledge along that whole wall. Paint small protrusions flat, and give a chimney a flat strip of ridge to stand on.
 - Shade with a 3-4 tone hue-shifted ramp: cool deep shadow, saturated mid, warm highlight. No gradients, no anti-aliasing.
+
+- Centre the object: the stack spins about the middle of its bounding box, so a base that reaches further on one side makes it orbit off-axis.
 
 ### Gate: look at the sheet before slicing
 
@@ -74,6 +77,7 @@ python3 scripts/views_to_slices.py views.png slices.png \
 | --- | --- | --- |
 | `--slices N` | auto (36 if the SIDE view is taller than 64 px, else native) | 15-20 chunky, 32-48 hi-bit, native height for drawn sheets, `0` keeps the sheet's raw pixels |
 | `--order` | `auto` | `auto` picks TOP and SIDE by matching proportions (TOP length = SIDE length, TOP width = FRONT width, SIDE height = FRONT height); reading order wins ties. `reading` forces TOP, SIDE, FRONT, BACK |
+| `--round` | off | Towers, balloons, pots, bottles: clips each slice to the ellipse its SIDE and FRONT spans describe. Leave off for fins, wings and boxes |
 | `--side-nose` | `left` | `right` if the SIDE view faces right |
 | `--top-nose` | `auto` | `up` or `down` if auto flips the TOP view |
 | `--shade` | `0.2` | 0.12-0.15 for richly shaded views, 0.25 for flat ones, 0 for none |

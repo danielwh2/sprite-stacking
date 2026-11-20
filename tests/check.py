@@ -82,4 +82,17 @@ vol, _ = views_to_slices(sheet(mush), slices=26, order="reading")
 dark = (vol[..., :3].astype(int).sum(-1) < 60) & (vol[..., 3] > 0)
 assert dark.sum() == 0, f"{dark.sum()} black voxels under the cap"
 
+# 4. --round: a thin tower on a wide disc base carves round, not square.
+yy, xx = np.mgrid[0:24, 0:24]
+disc = view(24, 24, [])
+disc[(yy - 11.5) ** 2 + (xx - 11.5) ** 2 < 144] = (*RED, 255)
+tower_side = view(24, 30, [(8, 0, 16, 26, RED), (0, 26, 24, 30, LEAF)])
+tower = [disc, tower_side, tower_side.copy(), tower_side.copy()]
+for round_, want_corner in ((False, True), (True, False)):
+    vol, _ = views_to_slices(sheet(tower), slices=32, order="reading", round_=round_)
+    mid = vol[16, ..., 3] > 0
+    ys, xs = np.nonzero(mid)
+    corner = mid[ys.min(), xs.min()]
+    assert corner == want_corner, f"round={round_}: tower corner filled={corner}"
+
 print("ok")

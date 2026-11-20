@@ -52,6 +52,7 @@ python3 skills/sprite-stacking/scripts/views_to_slices.py views.png slices.png \
 
 - `--slices N`: layer count. 15-20 chunky, 32-48 detailed.
 - `--order reading`: force TOP, SIDE, FRONT, BACK. Default matches views by proportion.
+- `--round`: towers, balloons, pots carve round, not square.
 - `--side-nose right`: the side view faces right.
 - `--colours N`: shared palette size, `0` keeps every colour.
 

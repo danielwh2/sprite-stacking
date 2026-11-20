@@ -239,6 +239,7 @@ def carve(
     front: np.ndarray,
     back: np.ndarray,
     shade: float = 0.0,
+    round_: bool = False,
 ) -> np.ndarray:
     """Visual-hull carve into slices [z, y, x, rgba], z=0 on the ground."""
     L, W = top.shape[:2]
@@ -249,6 +250,13 @@ def carve(
         along = side[r, :, 3] > 0
         across = (front[r, :, 3] > 0) | (back[r, :, 3] > 0)
         occ[z] = (top[..., 3] > 0) & along[:, None] & across[None, :]
+        if round_ and along.any() and across.any():
+            # Lathe: clip the row to the ellipse its side and front spans describe. The hull alone
+            # gives (widest top disk) & (square), so a tower narrower than its base carves square.
+            ys, xs = np.nonzero(along)[0], np.nonzero(across)[0]
+            ry, rx = (ys[-1] - ys[0]) / 2 + 0.5, (xs[-1] - xs[0]) / 2 + 0.5
+            yy, xx = np.mgrid[0:L, 0:W]
+            occ[z] &= ((yy - (ys[0] + ys[-1]) / 2) / ry) ** 2 + ((xx - (xs[0] + xs[-1]) / 2) / rx) ** 2 < 1
 
     vol = np.zeros((H, L, W, 4), dtype=np.uint8)
     covered = np.zeros((L, W), dtype=bool)
@@ -313,6 +321,7 @@ def views_to_slices(
     shade: float = 0.2,
     dark_thresh: int = 70,
     bg_tol: int = 28,
+    round_: bool = False,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     clean = remove_background(sheet, tol=bg_tol)
     raw_views = find_views(clean, order=order)
@@ -359,7 +368,7 @@ def views_to_slices(
     if top_nose == "up":
         top = top[::-1]
 
-    vol = carve(top, side_aligned, front, back_aligned, shade=shade)
+    vol = carve(top, side_aligned, front, back_aligned, shade=shade, round_=round_)
     display_views = [
         top,
         side_aligned[:, ::-1] if side_nose == "left" else side_aligned,
@@ -508,6 +517,7 @@ def main() -> None:
     p.add_argument("--order", choices=["auto", "reading"], default="auto", help="auto = match views by proportion; reading = top,side,front,back")
     p.add_argument("--colours", type=int, default=24, help="Shared palette size (0 = keep original colors)")
     p.add_argument("--shade", type=float, default=0.2, help="Darken side faces near ground (0 = flat, 0.2-0.25 = subtle depth)")
+    p.add_argument("--round", action="store_true", help="Lathe each slice to an ellipse: towers, balloons, pots, bottles")
     p.add_argument("--dark-thresh", type=int, default=70, help="Luminance cutoff for stripping 1px dark view outlines (0 = disable)")
     p.add_argument("--bg-tol", type=int, default=28, help="Color tolerance for flood-fill background removal on opaque sheets")
     p.add_argument("--preview", type=Path, default=None, help="Save a visual verification contact sheet PNG")
@@ -525,6 +535,7 @@ def main() -> None:
         shade=a.shade,
         dark_thresh=a.dark_thresh,
         bg_tol=a.bg_tol,
+        round_=a.round,
     )
 
     a.out.parent.mkdir(parents=True, exist_ok=True)
