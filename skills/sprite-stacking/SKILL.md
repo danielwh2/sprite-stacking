@@ -28,6 +28,7 @@ Pick a tier:
 
 - **Chunky retro:** 15-20 slices, about 25×48 px. Bold silhouettes, 3-4 px stripes, shown at 8-10x.
 - **Detailed hi-bit:** 26-44 slices, 36×72 to 46×107 px. Holds vents, logos, spoked rims, glass reflections, raised spoilers.
+- **Showcase / 1080p video:** 36-56 slices, 30×30 to 148×148 px, shown at 4-6x integer scale. Avoids chunky silhouette stepping and rotational wobble when tiny sprites are blown up to 7-9x on HD video.
 
 Then take the first source that applies.
 
@@ -109,7 +110,9 @@ Do not guess these:
 
 - **`spacing = 1.0`** screen px at the art-pixel scale.
 - **`squash = 0.75`** for an angled top-down camera. 1.0 looks straight down; below 0.6 roofs flatten to slivers. For a tilting camera, `squash = sin(elevation)`, `spacing = cos(elevation)`.
-- **Whole-pixel positions.** Fractional `pos` or offsets shimmer on rotation.
+- **Symmetric rotation centres.** In software/pixel-buffer rasterizers, sample around `(w - 1) * 0.5, (h - 1) * 0.5` with `Math.round(...)` nearest sampling. Using `Math.floor(... + w / 2)` on even-sized slices shifts the centre by 0.5 art px and creates visible rotational wobble across 90°/180°/270° turns.
+- **Smooth 60 fps placement.** Keep continuous motion (bobbing, floating, orbiting, parent-to-child projection) in floating-point screen pixels and snap only once at the final 1-screen-pixel blit (`Math.round(dx), Math.round(dy)`) with an integer display `scale`. Never quantize motion to art-pixel steps (`Math.round(...) * scale`) or round child projections independently — both cause harsh multi-pixel jumps and prop-to-ground jitter.
+- **Validate strip counts at load time.** Assert `sheet.width % count === 0` (and expected slice dimensions) when slicing a strip so upgrading a strip's slice count never silently slices mid-frame.
 - **Nearest-neighbour filtering.** `imageSmoothingEnabled = false` and `image-rendering: pixelated` on the web, Nearest/Point filter in engines.
 - **Ground shadow:** for vehicles, the union footprint at z = 0, offset +2, +3 art px, drawn before slice 0. For tall props, project the stacked slices along the sun vector per layer, with Bayer 4×4 dithered edges, not a generic oval.
 - **Outline the finished stack once, never per slice.** Per-slice outlines draw seams and speckle through the body. Render into a 1x art-pixel buffer, trace a 1px outline around its alpha, then scale up.
@@ -141,4 +144,8 @@ When a stack comes out wrong, fix it, then fix the cause where it can't recur: c
 | 2026-11-20 | Something sticking out of a wall carves a ledge along the whole wall | Paint small protrusions flat; give a chimney a flat strip of ridge | Rule |
 | 2026-11-20 | Background fully enclosed inside a view (between ropes, fins, legs) carves solid | Every gap must reach the outside of its view | Rule |
 | 2026-11-20 | A base that reaches further on one side makes the stack orbit off-axis | Centre the object in its views | Rule |
+| 2026-11-20 | Asymmetric `Math.floor(... + w / 2)` rotation sampling causes 0.5-art-px wobble across 90° boundaries | Use symmetric `(w - 1) * 0.5` centres with `Math.round(...)` nearest sampling | Rule |
+| 2026-11-20 | Quantizing bobbing, orbiting, or child-prop projection to art-pixel steps (`Math.round(...) * scale`) creates jarring multi-pixel jumps at 60 fps | Keep motion and projection continuous in screen pixels; snap once at the final 1-screen-px blit with integer `scale` | Rule |
+| 2026-11-20 | Tiny 12–24px props scaled 7–9× on 1080p video look overly chunky and exaggerate nearest-neighbor rotation stepping | Build denser strips (36–56 slices, 30–148px) and render at 4–6× integer scale for showcase video | Rule |
+| 2026-11-20 | Updating a strip's slice count without updating the loader's count silently slices mid-frame | Validate `sheet.width % count === 0` and slice width at load time | Rule |
 
