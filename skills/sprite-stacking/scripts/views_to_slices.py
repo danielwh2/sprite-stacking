@@ -254,6 +254,8 @@ def carve(
             # Lathe: clip the row to the ellipse its side and front spans describe. The hull alone
             # gives (widest top disk) & (square), so a tower narrower than its base carves square.
             ys, xs = np.nonzero(along)[0], np.nonzero(across)[0]
+            if not (along[ys[0] : ys[-1] + 1].all() and across[xs[0] : xs[-1] + 1].all()):
+                continue  # a gap in the row means separate posts, ropes or legs: keep them square
             ry, rx = (ys[-1] - ys[0]) / 2 + 0.5, (xs[-1] - xs[0]) / 2 + 0.5
             yy, xx = np.mgrid[0:L, 0:W]
             occ[z] &= ((yy - (ys[0] + ys[-1]) / 2) / ry) ** 2 + ((xx - (xs[0] + xs[-1]) / 2) / rx) ** 2 < 1
