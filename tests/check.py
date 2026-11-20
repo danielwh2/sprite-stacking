@@ -135,13 +135,30 @@ bright_body[1:9, 2:10, 2:10] = (250, 250, 250, 255)
 assert (detect_emissive(bright_body)[..., 3] == 0).all(), "dominant white body must not glow"
 assert (detect_emissive(np.zeros((4, 4, 4, 4), np.uint8))[..., 3] == 0).all()
 
-# 8. Viewer HTML embeds live lighting & Play mode controls.
+# 8. Viewer HTML embeds live lighting, Living Diorama Scene, Weather, and Play mode controls.
 import tempfile
 with tempfile.TemporaryDirectory() as td:
     html_path = Path(td) / "viewer.html"
     build_html_viewer(box_vol, [box_vol[0]] * 4, html_path, "Check")
     viewer_html = html_path.read_text(encoding="utf-8")
-for needle in ('data-mode="play"', 'data-toy="drive"', 'data-toy="wind"', 'data-toy="shatter"', 'id="timeRange"', 'id="sunRange"'):
+for needle in (
+    'data-mode="scene"',
+    'data-scene="street"',
+    'data-scene="island"',
+    'data-mode="play"',
+    'data-toy="drive"',
+    'data-toy="wind"',
+    'data-toy="shatter"',
+    'data-drive-world="street"',
+    'data-weather="rain"',
+    'data-weather="snow"',
+    'id="timeRange"',
+    'id="sunRange"',
+    'id="propInput"',
+    'drawWetReflection',
+    'snowMask',
+    'getCachedPropSprite',
+):
     assert needle in viewer_html, f"missing {needle} in viewer HTML"
 
 print("ok")

@@ -88,7 +88,7 @@ python3 scripts/views_to_slices.py views.png slices.png \
 | `--normals` | *(none)* | Save a matching 3D normal-map slice strip PNG |
 | `--emissive` | *(none)* | Save an auto-detected emissive mask strip PNG |
 
-Open `check.png` and look at it right after carving: all four extracted views, four turntable angles and the exploded view. Do this before writing any integration code. `viewer.html` opens in a browser with Turntable, Slice scan, Exploded, and Play modes (Drive, Wind, Shatter), live Time of Day (Day → Sunset → Night with auto-emissive glow and projected 3D shadows), and 16-direction PNG export.
+Open `check.png` and look at it right after carving: all four extracted views, four turntable angles and the exploded view. Do this before writing any integration code. `viewer.html` opens in a browser with Turntable, **Scene** (Living Diorama: Neon Street / Meadow Island with procedural stacked props + multi-PNG prop drops), Slice scan, Exploded, and **Play** modes (Drive through infinite Street/Meadow/Grid worlds, Wind, Shatter), live Time of Day (Day → Sunset → Night with auto-emissive glow and projected 3D shadows), **Weather** (Rain with wavy wet reflections & ripples, Snow with `normZ` snow-cap accumulation), and 16-direction PNG export.
 
 ## 3. Render: the loop and its numbers
 
