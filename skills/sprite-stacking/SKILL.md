@@ -79,7 +79,7 @@ python3 scripts/views_to_slices.py views.png slices.png \
 | `--order` | `auto` | `auto` picks TOP and SIDE by matching proportions (TOP length = SIDE length, TOP width = FRONT width, SIDE height = FRONT height); reading order wins ties. `reading` forces TOP, SIDE, FRONT, BACK |
 | `--round` | off | Towers, balloons, pots, bottles: clips each slice to the ellipse its SIDE and FRONT spans describe. Leave off for fins, wings and boxes |
 | `--side-nose` | `left` | `right` if the SIDE view faces right |
-| `--top-nose` | `auto` | `up` or `down` if auto flips the TOP view |
+| `--top-nose` | `auto` | Auto reads car cabins. Pass `down` for anything that is not a vehicle, and `up` or `down` if it flips a car |
 | `--shade` | `0.2` | 0.12-0.15 for richly shaded views, 0.25 for flat ones, 0 for none |
 | `--colours` | `24` | 32-48 for detailed liveries, `0` to keep every colour |
 | `--bg-tol` | `28` | Raise a little if JPEG noise leaves a fringe |
