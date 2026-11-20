@@ -60,7 +60,11 @@ python3 skills/sprite-stacking/scripts/views_to_slices.py views.png slices.png \
 
 ## Viewer
 
-`--html` writes a standalone page: turntable, slice scan, exploded view, **Play** mode (**Drive** with WASD/arrows + drift, **Wind** sway, **Shatter** & rebuild), live **Time of Day** (Day → Sunset → Night with auto-emissive glow and light pools), draggable sun (`Shift+drag`) with projected 3D shadows, and 16-direction PNG export. `skills/sprite-stacking/scripts/viewer.html` also opens on its own and takes a dropped slice strip.
+`--html` writes a standalone page:
+- **Modes:** Turntable, **Scene** (Living Diorama with **Neon Street** and **Meadow Island** procedural stacked props, unified Y-sorting, and multi-PNG drop / `+ Add Prop`), Slice scan, Exploded view, and **Play** mode (**Drive** with WASD/arrows + drift across infinite Street/Meadow/Grid worlds, **Wind** sway, **Shatter** & rebuild).
+- **Lighting & Weather:** Live **Time of Day** (Day → Sunset → Night with auto-emissive glow and ground light pools), draggable sun (`Shift+drag`) with projected 3D shadows, and **Weather** (**Rain** with pixel streaks, ground ripples, and wavy upside-down wet reflections; **Snow** with real-time snow cap accumulation on upward-facing voxels via `normZ`).
+- **Performance:** Vectorized NumPy carving, zero-allocation typed-array software rasterizer, and angle/lighting-keyed prop sprite caching (~0.2–1.5 ms/frame in Chrome).
+- **Export:** 16-direction baked PNG sprite sheet export. `skills/sprite-stacking/scripts/viewer.html` also opens on its own and accepts dropped slice strips.
 
 ## Requirements
 

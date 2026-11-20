@@ -38,14 +38,16 @@
   main:active { cursor: grabbing; }
   main.play-drive, main.play-shatter { cursor: pointer; }
   canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
-  .toy-bar {
+  .toy-bar, .scene-bar {
     position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
     display: none; align-items: center; gap: 6px; padding: 5px 8px;
     background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px);
     border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
     z-index: 4;
   }
-  .toy-bar.visible { display: flex; }
+  .toy-bar.visible, .scene-bar.visible { display: flex; }
+  .pill-group { display: inline-flex; align-items: center; gap: 2px; }
+  .pill-group button { padding: 3px 7px; font-size: 11px; }
   .toy-hint {
     font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
     padding: 0 4px 0 6px; border-left: 1px solid var(--border); white-space: nowrap;
@@ -89,6 +91,7 @@
   </div>
   <div class="modes" role="group" aria-label="View mode">
     <button data-mode="turntable" aria-pressed="true">Turntable</button>
+    <button data-mode="scene" aria-pressed="false">Scene</button>
     <button data-mode="scan" aria-pressed="false">Slice scan</button>
     <button data-mode="exploded" aria-pressed="false">Exploded</button>
     <button data-mode="play" aria-pressed="false">Play</button>
@@ -97,20 +100,34 @@
     <button id="playBtn" title="Space">Pause</button>
     <button id="exportBtn" title="Export 16-angle sprite sheet PNG">Export 16-dir</button>
     <label class="btn" for="fileInput">Load PNG</label>
-    <input id="fileInput" type="file" accept="image/png,image/webp" />
+    <input id="fileInput" type="file" accept="image/png,image/webp" multiple />
+    <input id="propInput" type="file" accept="image/png,image/webp" multiple style="display:none" />
   </div>
 </header>
 
 <main id="stage">
+  <div class="scene-bar" id="sceneBar" role="group" aria-label="Diorama scene">
+    <button data-scene="street" aria-pressed="true">Neon Street</button>
+    <button data-scene="island" aria-pressed="false">Meadow Island</button>
+    <label class="btn" for="propInput" title="Add another slice sheet PNG to the diorama">+ Add Prop</label>
+    <button id="clearPropsBtn" style="display:none" title="Remove added props">Clear</button>
+    <span class="toy-hint" id="sceneHint">Drag to orbit · Drop PNGs to add</span>
+  </div>
   <div class="toy-bar" id="toyBar" role="group" aria-label="Play toys">
     <button data-toy="drive" aria-pressed="true">Drive</button>
     <button data-toy="wind" aria-pressed="false">Wind</button>
     <button data-toy="shatter" aria-pressed="false">Shatter</button>
+    <span class="sep"></span>
+    <span class="pill-group" id="driveWorldGroup" role="group" aria-label="Drive world">
+      <button data-drive-world="street" aria-pressed="true">Street</button>
+      <button data-drive-world="island" aria-pressed="false">Meadow</button>
+      <button data-drive-world="grid" aria-pressed="false">Grid</button>
+    </span>
     <span class="toy-hint" id="toyHint">WASD / Arrows · Space drift</span>
   </div>
   <canvas id="view"></canvas>
   <div class="readout" id="readout"></div>
-  <div class="drop-hint">Drop a horizontal slice sheet PNG</div>
+  <div class="drop-hint">Drop slice sheet PNGs (hold Shift to add as diorama prop)</div>
 </main>
 
 <footer>
@@ -145,6 +162,14 @@
   <label class="ctrl"><input id="lightChk" type="checkbox" checked /> Light</label>
   <label class="ctrl"><input id="shadowChk" type="checkbox" checked /> Shadow</label>
   <label class="ctrl"><input id="outlineChk" type="checkbox" checked /> Outline</label>
+  <span class="sep"></span>
+  <span class="ctrl">Weather
+    <span class="pill-group" role="group" aria-label="Weather">
+      <button data-weather="clear" aria-pressed="true">Clear</button>
+      <button data-weather="rain" aria-pressed="false">Rain</button>
+      <button data-weather="snow" aria-pressed="false">Snow</button>
+    </span>
+  </span>
   <span class="spacer"></span>
   <span class="meta" id="footerHint">Drag to orbit · Shift+drag sun · Space pause</span>
 </footer>
@@ -154,6 +179,9 @@ const EMBEDDED = /*__EMBEDDED_STACK__*/null;
 
 const state = {
   mode: "turntable",
+  scene: "street",     // "street" | "island"
+  driveWorld: "street", // "street" | "island" | "grid"
+  weather: "clear",    // "clear" | "rain" | "snow"
   toy: "drive",
   playing: true,
   angle: 35,
@@ -173,9 +201,59 @@ const state = {
   topImg: null,
   sideImg: null,
   vol: null,       // Precomputed compact voxel volume
+  userProps: [],   // Extra user-loaded slice-sheet assets for diorama [{ name, vol, x, y, rot }]
   dirty: true,
   lastRenderMs: 0,
 };
+
+// Weather engine (zero per-frame heap allocations)
+const RAIN_COUNT = 110;
+const RIPPLE_COUNT = 36;
+const SNOW_COUNT = 100;
+const weather = {
+  time: 0,
+  snowCover: 0,    // 0..1 smooth accumulation on upward-facing voxels
+  wetness: 0,      // 0..1 smooth ground wetness / reflection strength
+  // Raindrops: x, y (0..1 normalized), speed, len
+  rain: new Float32Array(RAIN_COUNT * 4),
+  // Ground ripples: x, y (0..1), age (0..1), maxR
+  ripples: new Float32Array(RIPPLE_COUNT * 4),
+  // Snowflakes: x, y (0..1), speed, phase
+  snow: new Float32Array(SNOW_COUNT * 4),
+};
+for (let i = 0; i < RAIN_COUNT; i++) {
+  weather.rain[i * 4] = Math.random();
+  weather.rain[i * 4 + 1] = Math.random();
+  weather.rain[i * 4 + 2] = 1.45 + Math.random() * 0.85;
+  weather.rain[i * 4 + 3] = 4 + Math.floor(Math.random() * 4);
+}
+for (let i = 0; i < RIPPLE_COUNT; i++) {
+  weather.ripples[i * 4] = Math.random();
+  weather.ripples[i * 4 + 1] = 0.28 + Math.random() * 0.68;
+  weather.ripples[i * 4 + 2] = Math.random();
+  weather.ripples[i * 4 + 3] = 4 + Math.floor(Math.random() * 4);
+}
+for (let i = 0; i < SNOW_COUNT; i++) {
+  weather.snow[i * 4] = Math.random();
+  weather.snow[i * 4 + 1] = Math.random();
+  weather.snow[i * 4 + 2] = 0.16 + Math.random() * 0.16;
+  weather.snow[i * 4 + 3] = Math.random() * Math.PI * 2;
+}
+
+// Reusable 4-int scratch for sliceScreenBounds (zero GC per slice)
+const _sb = new Int32Array(4);
+
+// Cached rasterized diorama props keyed by model + quantized lighting/angle state
+const propCache = new Map();
+const PROP_CACHE_MAX = 96;
+
+// Reusable offscreen buffer for wavy wet reflections (avoids canvas allocs)
+const reflBuf = {
+  w: 0, h: 0,
+  canvas: document.createElement("canvas"),
+  ctx: null,
+};
+reflBuf.ctx = reflBuf.canvas.getContext("2d");
 
 // Interactive Toy Mode state (zero per-frame heap allocations)
 const drive = {
@@ -245,6 +323,10 @@ const titleText = document.getElementById("titleText");
 const metaText = document.getElementById("metaText");
 const toyBar = document.getElementById("toyBar");
 const toyHint = document.getElementById("toyHint");
+const sceneBar = document.getElementById("sceneBar");
+const sceneHint = document.getElementById("sceneHint");
+const clearPropsBtn = document.getElementById("clearPropsBtn");
+const driveWorldGroup = document.getElementById("driveWorldGroup");
 const footerHint = document.getElementById("footerHint");
 
 const els = {
@@ -363,58 +445,10 @@ function updateStageTheme() {
   else els.timeOut.textContent = "Night";
 }
 
-// Extract slices and precompute 3D normals, ambient occlusion, emissive accents, tight AABBs, and shatter voxels
-function extractSlices(img, count) {
-  const w = Math.floor(img.width / count);
-  const h = img.height;
-  if (w < 1 || h < 1) return;
-
-  const off = document.createElement("canvas");
-  off.width = img.width;
-  off.height = img.height;
-  const octx = off.getContext("2d", { willReadFrequently: true });
-  octx.imageSmoothingEnabled = false;
-  octx.drawImage(img, 0, 0);
-
+// Build a compact voxel volume (normals, AO, emissive, snowMask, bounds) from raw occupancy + RGB
+function buildVolumeFromPixels(w, h, count, occ, rgb, rgb32, bounds, opts = {}) {
   const area = w * h;
   const total = count * area;
-  const occ = new Uint8Array(total);
-  const rgb = new Uint8Array(total * 3);
-  const rgb32 = new Uint32Array(total);
-  const footprint = new Uint8Array(area);
-  const bounds = new Array(count);
-
-  for (let z = 0; z < count; z++) {
-    const data = octx.getImageData(z * w, 0, w, h).data;
-    const base = z * area;
-    let minX = w, maxX = -1, minY = h, maxY = -1;
-    for (let y = 0; y < h; y++) {
-      const row = y * w;
-      for (let x = 0; x < w; x++) {
-        const i = row + x;
-        const p = i * 4;
-        if (data[p + 3] > 0) {
-          const idx = base + i;
-          occ[idx] = 1;
-          const r = data[p], g = data[p + 1], b = data[p + 2];
-          rgb[idx * 3] = r;
-          rgb[idx * 3 + 1] = g;
-          rgb[idx * 3 + 2] = b;
-          rgb32[idx] = packABGR(r, g, b, 255);
-          footprint[i] = 1;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-    bounds[z] = maxX >= minX
-      ? { minX, maxX, minY, maxY, empty: false }
-      : { minX: 0, maxX: 0, minY: 0, maxY: 0, empty: true };
-  }
-
-  // Fast 3D outward normals & baked ambient occlusion
   const normX = new Float32Array(total);
   const normY = new Float32Array(total);
   const normZ = new Float32Array(total);
@@ -447,7 +481,6 @@ function extractSlices(img, count) {
           colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
         }
 
-        // Smooth 3x3x3-like weighted outward normal (face weight 2, diagonal weight 1)
         let gx = (xm - xp) * 2
           + (at(z, y - 1, x - 1) - at(z, y - 1, x + 1))
           + (at(z, y + 1, x - 1) - at(z, y + 1, x + 1))
@@ -473,56 +506,61 @@ function extractSlices(img, count) {
           normX[idx] = 0; normY[idx] = 0; normZ[idx] = 1;
         }
 
-        // Subtle baked AO from upper/adjacent enclosure
         const upperOcc = zp + at(z + 1, y - 1, x) + at(z + 1, y + 1, x) + at(z + 1, y, x - 1) + at(z + 1, y, x + 1);
         ao[idx] = 1.0 - upperOcc * 0.042;
       }
     }
   }
 
-  // Smart auto-emissive detection (exclude dominant body colors > 14% of surface)
-  const emis = new Uint8Array(total);
+  // Emissive detection (either explicit mask for procedural props, or smart auto-detect)
+  const emis = opts.explicitEmis ? opts.explicitEmis : new Uint8Array(total);
   const emissiveSeeds = [];
-  const dominant = new Set();
-  if (surfCount > 0) {
-    for (const [k, c] of colorCounts.entries()) {
-      if (c / surfCount > 0.14) dominant.add(k);
+  if (!opts.explicitEmis) {
+    const dominant = new Set();
+    if (surfCount > 0) {
+      for (const [k, c] of colorCounts.entries()) {
+        if (c / surfCount > 0.14) dominant.add(k);
+      }
     }
-  }
-  for (let z = 0; z < count; z++) {
-    const b = bounds[z];
-    if (b.empty) continue;
-    const zBase = z * area;
-    for (let y = b.minY; y <= b.maxY; y++) {
-      const row = zBase + y * w;
-      for (let x = b.minX; x <= b.maxX; x++) {
-        const idx = row + x;
-        if (!surfaceMask[idx]) continue;
-        if (dominant.has(rgb32[idx])) continue;
-        const r = rgb[idx * 3], g = rgb[idx * 3 + 1], bl = rgb[idx * 3 + 2];
-        const luma = 0.299 * r + 0.587 * g + 0.114 * bl;
-        const maxC = r > g ? (r > bl ? r : bl) : (g > bl ? g : bl);
-        const minC = r < g ? (r < bl ? r : bl) : (g < bl ? g : bl);
-        const sat = (maxC - minC) / (maxC || 1);
-        if ((luma >= 180 && (sat >= 0.30 || luma >= 232)) || (maxC >= 215 && sat >= 0.62 && luma >= 110)) {
-          emis[idx] = 1;
-          emissiveSeeds.push({ x: x - w * 0.5, y: y - h * 0.5, z, r, g, b: bl });
+    for (let z = 0; z < count; z++) {
+      const b = bounds[z];
+      if (b.empty) continue;
+      const zBase = z * area;
+      for (let y = b.minY; y <= b.maxY; y++) {
+        const row = zBase + y * w;
+        for (let x = b.minX; x <= b.maxX; x++) {
+          const idx = row + x;
+          if (!surfaceMask[idx]) continue;
+          if (dominant.has(rgb32[idx])) continue;
+          const r = rgb[idx * 3], g = rgb[idx * 3 + 1], bl = rgb[idx * 3 + 2];
+          const luma = 0.299 * r + 0.587 * g + 0.114 * bl;
+          const maxC = r > g ? (r > bl ? r : bl) : (g > bl ? g : bl);
+          const minC = r < g ? (r < bl ? r : bl) : (g < bl ? g : bl);
+          const sat = (maxC - minC) / (maxC || 1);
+          if ((luma >= 180 && (sat >= 0.30 || luma >= 232)) || (maxC >= 215 && sat >= 0.62 && luma >= 110)) {
+            emis[idx] = 1;
+            emissiveSeeds.push({ x: x - w * 0.5, y: y - h * 0.5, z, r, g, b: bl });
+          }
+        }
+      }
+    }
+  } else {
+    for (let z = 0; z < count; z++) {
+      const b = bounds[z];
+      if (b.empty) continue;
+      const zBase = z * area;
+      for (let y = b.minY; y <= b.maxY; y++) {
+        const row = zBase + y * w;
+        for (let x = b.minX; x <= b.maxX; x++) {
+          const idx = row + x;
+          if (emis[idx]) emissiveSeeds.push({ x: x - w * 0.5, y: y - h * 0.5, z, r: rgb[idx * 3], g: rgb[idx * 3 + 1], b: rgb[idx * 3 + 2] });
         }
       }
     }
   }
 
-  // Cluster/subsample emissive seeds to at most 20 ground light pools
-  const lightPools = [];
-  if (emissiveSeeds.length > 0) {
-    const step = Math.max(1, Math.floor(emissiveSeeds.length / 20));
-    for (let i = 0; i < emissiveSeeds.length && lightPools.length < 20; i += step) {
-      lightPools.push(emissiveSeeds[i]);
-    }
-  }
-
-  // Build compact surface voxel list for Shatter toy (capped at 700)
-  const surfList = [];
+  // Precompute snow accumulation mask: exposed upward-facing non-emissive voxels (normZ > 0.58)
+  const snowMask = new Uint8Array(total);
   for (let z = 0; z < count; z++) {
     const b = bounds[z];
     if (b.empty) continue;
@@ -531,54 +569,143 @@ function extractSlices(img, count) {
       const row = zBase + y * w;
       for (let x = b.minX; x <= b.maxX; x++) {
         const idx = row + x;
-        if (surfaceMask[idx]) surfList.push({ x: x - w * 0.5, y: y - h * 0.5, z, col: rgb32[idx], em: emis[idx] });
+        if (!occ[idx] || emis[idx]) continue;
+        if (normZ[idx] > 0.42 && (z === count - 1 || !occ[idx + area])) {
+          // Vary threshold slightly with deterministic spatial hash so snow accumulates organically
+          snowMask[idx] = 1 + ((x * 7 + y * 13 + z * 3) & 3); // 1..4
+        }
       }
     }
   }
-  const sStep = Math.max(1, Math.ceil(surfList.length / 700));
-  let sCount = 0;
-  for (let i = 0; i < surfList.length && sCount < 700; i += sStep) {
-    const v = surfList[i];
-    shatter.hx[sCount] = v.x; shatter.hy[sCount] = v.y; shatter.hz[sCount] = v.z;
-    shatter.col[sCount] = v.col; shatter.em[sCount] = v.em;
-    sCount++;
-  }
-  shatter.count = sCount;
-  shatter.phase = "idle";
 
-  state.vol = {
+  const lightPools = [];
+  if (emissiveSeeds.length > 0) {
+    const maxPools = opts.maxPools || 20;
+    const step = Math.max(1, Math.floor(emissiveSeeds.length / maxPools));
+    for (let i = 0; i < emissiveSeeds.length && lightPools.length < maxPools; i += step) {
+      lightPools.push(emissiveSeeds[i]);
+    }
+  }
+
+  if (opts.populateShatter) {
+    const surfList = [];
+    for (let z = 0; z < count; z++) {
+      const b = bounds[z];
+      if (b.empty) continue;
+      const zBase = z * area;
+      for (let y = b.minY; y <= b.maxY; y++) {
+        const row = zBase + y * w;
+        for (let x = b.minX; x <= b.maxX; x++) {
+          const idx = row + x;
+          if (surfaceMask[idx]) surfList.push({ x: x - w * 0.5, y: y - h * 0.5, z, col: rgb32[idx], em: emis[idx] });
+        }
+      }
+    }
+    const sStep = Math.max(1, Math.ceil(surfList.length / 700));
+    let sCount = 0;
+    for (let i = 0; i < surfList.length && sCount < 700; i += sStep) {
+      const v = surfList[i];
+      shatter.hx[sCount] = v.x; shatter.hy[sCount] = v.y; shatter.hz[sCount] = v.z;
+      shatter.col[sCount] = v.col; shatter.em[sCount] = v.em;
+      sCount++;
+    }
+    shatter.count = sCount;
+    shatter.phase = "idle";
+  }
+
+  return {
     n: count, w, h, area,
-    occ, rgb, rgb32, normX, normY, normZ, ao, emis,
-    footprint, bounds, lightPools,
+    occ, rgb, rgb32, normX, normY, normZ, ao, emis, snowMask,
+    bounds, lightPools,
   };
+}
+
+function extractVolumeFromImage(img, count, populateShatter = false) {
+  const w = Math.floor(img.width / count);
+  const h = img.height;
+  if (w < 1 || h < 1) return null;
+
+  const off = document.createElement("canvas");
+  off.width = img.width;
+  off.height = img.height;
+  const octx = off.getContext("2d", { willReadFrequently: true });
+  octx.imageSmoothingEnabled = false;
+  octx.drawImage(img, 0, 0);
+
+  const area = w * h;
+  const total = count * area;
+  const occ = new Uint8Array(total);
+  const rgb = new Uint8Array(total * 3);
+  const rgb32 = new Uint32Array(total);
+  const bounds = new Array(count);
+
+  for (let z = 0; z < count; z++) {
+    const data = octx.getImageData(z * w, 0, w, h).data;
+    const base = z * area;
+    let minX = w, maxX = -1, minY = h, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const i = row + x;
+        const p = i * 4;
+        if (data[p + 3] > 0) {
+          const idx = base + i;
+          occ[idx] = 1;
+          const r = data[p], g = data[p + 1], b = data[p + 2];
+          rgb[idx * 3] = r;
+          rgb[idx * 3 + 1] = g;
+          rgb[idx * 3 + 2] = b;
+          rgb32[idx] = packABGR(r, g, b, 255);
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    bounds[z] = maxX >= minX
+      ? { minX, maxX, minY, maxY, empty: false }
+      : { minX: 0, maxX: 0, minY: 0, maxY: 0, empty: true };
+  }
+
+  return buildVolumeFromPixels(w, h, count, occ, rgb, rgb32, bounds, { populateShatter });
+}
+
+function extractSlices(img, count) {
+  const vol = extractVolumeFromImage(img, count, true);
+  if (!vol) return;
+  state.vol = vol;
   state.scanZ = count;
   state.dirty = true;
-  metaText.textContent = `${count} slices · ${w}×${h}px`;
+  metaText.textContent = `${count} slices · ${vol.w}×${vol.h}px`;
 
-  const ideal = Math.max(2, Math.min(10, Math.floor(320 / Math.max(w, h, count * 2))));
+  const ideal = Math.max(2, Math.min(10, Math.floor(320 / Math.max(vol.w, vol.h, count * 2))));
   state.scale = ideal;
   els.scale.value = String(ideal);
   els.scaleOut.textContent = `${ideal}x`;
 }
 
-// Compute tight rotated screen-space AABB for a slice bounds
+// Compute tight rotated screen-space AABB into module-level _sb (zero GC allocation)
 function sliceScreenBounds(b, w, h, cx, yCenter, ca, sa, squash, cw, ch) {
   const x0 = b.minX - w * 0.5, x1 = b.maxX + 1 - w * 0.5;
   const y0 = b.minY - h * 0.5, y1 = b.maxY + 1 - h * 0.5;
-  // Forward rotation (inverse of sampling): dx = lx*ca - ly*sa, dy = (lx*sa + ly*ca)*squash
   const c0x = x0 * ca - y0 * sa, c0y = (x0 * sa + y0 * ca) * squash;
   const c1x = x1 * ca - y0 * sa, c1y = (x1 * sa + y0 * ca) * squash;
   const c2x = x0 * ca - y1 * sa, c2y = (x0 * sa + y1 * ca) * squash;
   const c3x = x1 * ca - y1 * sa, c3y = (x1 * sa + y1 * ca) * squash;
-  const minX = Math.max(0, Math.floor(cx + Math.min(c0x, c1x, c2x, c3x)) - 1);
-  const maxX = Math.min(cw - 1, Math.ceil(cx + Math.max(c0x, c1x, c2x, c3x)) + 1);
-  const minY = Math.max(0, Math.floor(yCenter + Math.min(c0y, c1y, c2y, c3y)) - 1);
-  const maxY = Math.min(ch - 1, Math.ceil(yCenter + Math.max(c0y, c1y, c2y, c3y)) + 1);
-  return [minX, maxX, minY, maxY];
+  let minCx = c0x; if (c1x < minCx) minCx = c1x; if (c2x < minCx) minCx = c2x; if (c3x < minCx) minCx = c3x;
+  let maxCx = c0x; if (c1x > maxCx) maxCx = c1x; if (c2x > maxCx) maxCx = c2x; if (c3x > maxCx) maxCx = c3x;
+  let minCy = c0y; if (c1y < minCy) minCy = c1y; if (c2y < minCy) minCy = c2y; if (c3y < minCy) minCy = c3y;
+  let maxCy = c0y; if (c1y > maxCy) maxCy = c1y; if (c2y > maxCy) maxCy = c2y; if (c3y > maxCy) maxCy = c3y;
+  _sb[0] = Math.max(0, Math.floor(cx + minCx) - 1);
+  _sb[1] = Math.min(cw - 1, Math.ceil(cx + maxCx) + 1);
+  _sb[2] = Math.max(0, Math.floor(yCenter + minCy) - 1);
+  _sb[3] = Math.min(ch - 1, Math.ceil(yCenter + maxCy) + 1);
 }
 
-// Ultra-fast zero-allocation software rasterizer with 3D normals, projected 3D shadows, and night emissive glow
+// Ultra-fast zero-allocation software rasterizer with 3D normals, projected 3D shadows, snow cap, and night emissive glow
 function rasterizeStackIntoScratch({
+  vol = state.vol,
   angleDeg, squash, spacing, maxSlices, shadow, outline,
   room = spacing,
   cwOverride = 0, chOverride = 0, cxOverride = 0, baseYOverride = 0,
@@ -586,10 +713,9 @@ function rasterizeStackIntoScratch({
   shearPerSlice = null,
   leanX = 0,
 }) {
-  const vol = state.vol;
   if (!vol) return null;
-  const n = Math.min(vol.n, Math.max(1, maxSlices));
-  const { w, h, area, occ, rgb, rgb32, normX, normY, normZ, ao, emis, bounds, lightPools } = vol;
+  const n = Math.min(vol.n, Math.max(1, maxSlices || vol.n));
+  const { w, h, area, occ, rgb, rgb32, normX, normY, normZ, ao, emis, snowMask, bounds, lightPools } = vol;
   const env = getLightingEnv(state.timeOfDay, state.sunAngle);
 
   const diag = Math.ceil(Math.hypot(w, h)) + 6;
@@ -629,14 +755,16 @@ function rasterizeStackIntoScratch({
   if (shadow) {
     shadowMask.fill(0);
     const shStep = n > 44 ? 2 : 1;
+    const invN = 1 / Math.max(1, n - 1);
     for (let z = 0; z < n; z += shStep) {
       const b = bounds[z];
       if (b.empty) continue;
       const zBase = z * area;
-      const sxOff = shearPerSlice ? shearPerSlice[z] : leanX * (z / Math.max(1, n - 1));
+      const sxOff = shearPerSlice ? shearPerSlice[z] : leanX * (z * invN);
       const scx = cx + sxOff + z * spacing * env.shDx;
       const scy = baseY + 1 + z * spacing * env.shDy * squash;
-      const [xMin, xMax, yMin, yMax] = sliceScreenBounds(b, w, h, scx, scy, ca, sa, squash, cw, ch);
+      sliceScreenBounds(b, w, h, scx, scy, ca, sa, squash, cw, ch);
+      const xMin = _sb[0], xMax = _sb[1], yMin = _sb[2], yMax = _sb[3];
       if (xMin > xMax || yMin > yMax) continue;
 
       for (let y = yMin; y <= yMax; y++) {
@@ -676,7 +804,6 @@ function rasterizeStackIntoScratch({
           const dx = x - gx;
           const d2 = dx * dx + dy2;
           if (d2 >= radSq) continue;
-          // Crisp 2-step pixel falloff
           const f = d2 < radSq * 0.35 ? glow : glow * 0.45;
           const p = (y * cw + x) * 4;
           if (out8[p + 3] === 0) {
@@ -694,22 +821,26 @@ function rasterizeStackIntoScratch({
     }
   }
 
-  // 3. Slice stack rasterization (bottom to top, tight AABB + incremental scanlines)
+  // 3. Slice stack rasterization (bottom to top, tight AABB + incremental scanlines + real-time Snow Cap)
   const useLight = state.lighting;
   const emisGlow = env.emisGlow;
   const shR = env.shMulR, shG = env.shMulG, shB = env.shMulB;
   const midR = env.midMulR, midG = env.midMulG, midB = env.midMulB;
   const litR = env.litMulR, litG = env.litMulG, litB = env.litMulB;
+  const snowLevel = weather.snowCover * 4.2; // 0..4.2 compared against snowMask (1..4)
+  const hasSnow = snowLevel > 0.25;
+  const invN = 1 / Math.max(1, n - 1);
 
   for (let z = 0; z < n; z++) {
     const b = bounds[z];
     if (b.empty) continue;
     const zBase = z * area;
     const lift = Math.round(z * spacing);
-    const sxOff = shearPerSlice ? shearPerSlice[z] : leanX * (z / Math.max(1, n - 1));
+    const sxOff = shearPerSlice ? shearPerSlice[z] : leanX * (z * invN);
     const sliceCx = cx + sxOff;
     const yCenter = baseY - lift;
-    const [xMin, xMax, yMin, yMax] = sliceScreenBounds(b, w, h, sliceCx, yCenter, ca, sa, squash, cw, ch);
+    sliceScreenBounds(b, w, h, sliceCx, yCenter, ca, sa, squash, cw, ch);
+    const xMin = _sb[0], xMax = _sb[1], yMin = _sb[2], yMax = _sb[3];
     if (xMin > xMax || yMin > yMax) continue;
 
     for (let y = yMin; y <= yMax; y++) {
@@ -726,8 +857,10 @@ function rasterizeStackIntoScratch({
         if (!occ[vIdx]) continue;
 
         alphaMask[idx] = 1;
+        const isSnow = hasSnow && snowMask[vIdx] > 0 && snowMask[vIdx] <= snowLevel;
+
         if (!useLight) {
-          out32[idx] = rgb32[vIdx];
+          out32[idx] = isSnow ? 0xfff8f4ee : rgb32[vIdx];
           continue;
         }
 
@@ -738,7 +871,7 @@ function rasterizeStackIntoScratch({
           const r = clampByte(rgb[p3] * boost + emisGlow * 28);
           const g = clampByte(rgb[p3 + 1] * boost + emisGlow * 24);
           const bl = clampByte(rgb[p3 + 2] * boost + emisGlow * 18);
-          out32[idx] = packABGR(r, g, bl, 255);
+          out32[idx] = (0xff000000 | (bl << 16) | (g << 8) | r);
           continue;
         }
 
@@ -752,13 +885,17 @@ function rasterizeStackIntoScratch({
         } else {
           mr = shR * occAO; mg = shG * occAO; mb = shB * occAO;
         }
-        const p3 = vIdx * 3;
-        out32[idx] = packABGR(
-          clampByte(rgb[p3] * mr),
-          clampByte(rgb[p3 + 1] * mg),
-          clampByte(rgb[p3 + 2] * mb),
-          255
-        );
+        let br, bg, bb;
+        if (isSnow) {
+          br = 238; bg = 245; bb = 255;
+        } else {
+          const p3 = vIdx * 3;
+          br = rgb[p3]; bg = rgb[p3 + 1]; bb = rgb[p3 + 2];
+        }
+        const rr = (br * mr) | 0;
+        const gg = (bg * mg) | 0;
+        const bl = (bb * mb) | 0;
+        out32[idx] = (0xff000000 | ((bl > 255 ? 255 : bl) << 16) | ((gg > 255 ? 255 : gg) << 8) | (rr > 255 ? 255 : rr));
       }
     }
   }
@@ -809,6 +946,485 @@ function rasterizeStackIntoScratch({
   scratch.cx = cx;
   scratch.baseY = baseY;
   return scratch.canvas;
+}
+
+// ============================================================
+// PROCEDURAL VOXEL PROPS + SPRITE CACHE (Living Diorama Engine)
+// ============================================================
+function makeProceduralVolume(w, h, n, fillFn) {
+  const area = w * h;
+  const total = n * area;
+  const occ = new Uint8Array(total);
+  const rgb = new Uint8Array(total * 3);
+  const rgb32 = new Uint32Array(total);
+  const emis = new Uint8Array(total);
+  const bounds = new Array(n);
+
+  const put = (z, y, x, r, g, b, isEmis = 0) => {
+    if (z < 0 || z >= n || y < 0 || y >= h || x < 0 || x >= w) return;
+    const idx = z * area + y * w + x;
+    occ[idx] = 1;
+    rgb[idx * 3] = r; rgb[idx * 3 + 1] = g; rgb[idx * 3 + 2] = b;
+    rgb32[idx] = packABGR(r, g, b, 255);
+    if (isEmis) emis[idx] = 1;
+  };
+  fillFn(put, w, h, n);
+
+  for (let z = 0; z < n; z++) {
+    const base = z * area;
+    let minX = w, maxX = -1, minY = h, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (occ[base + y * w + x]) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    bounds[z] = maxX >= minX
+      ? { minX, maxX, minY, maxY, empty: false }
+      : { minX: 0, maxX: 0, minY: 0, maxY: 0, empty: true };
+  }
+  return buildVolumeFromPixels(w, h, n, occ, rgb, rgb32, bounds, { explicitEmis: emis, maxPools: 6 });
+}
+
+const PROCEDURAL_PROPS = {
+  // Multi-tier stacked pixel pine tree
+  pine: makeProceduralVolume(14, 14, 22, (put) => {
+    const cx = 6.5, cy = 6.5;
+    for (let z = 0; z < 6; z++) {
+      for (let y = 5; y <= 8; y++) for (let x = 5; x <= 8; x++) {
+        if ((x - cx) ** 2 + (y - cy) ** 2 <= 2.4) put(z, y, x, 114, 74, 48);
+      }
+    }
+    const tiers = [[4, 11, 5.6], [9, 16, 4.4], [14, 20, 3.0], [18, 22, 1.7]];
+    for (const [z0, z1, rMax] of tiers) {
+      for (let z = z0; z < z1; z++) {
+        const frac = (z - z0) / Math.max(1, z1 - z0);
+        const rad = rMax * (1 - frac * 0.72);
+        for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
+          const d = Math.hypot(x - cx, y - cy);
+          if (d <= rad) {
+            const hi = ((x + y + z) & 1) ? 14 : 0;
+            put(z, y, x, 38 + hi, 116 + z * 2 + hi, 62 + hi);
+          }
+        }
+      }
+    }
+  }),
+
+  // Streetlamp with glowing warm lantern head
+  lamp: makeProceduralVolume(9, 9, 24, (put) => {
+    for (let z = 0; z < 3; z++) for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) put(z, y, x, 64, 74, 92);
+    for (let z = 3; z < 19; z++) put(z, 4, 4, 82, 94, 114);
+    for (let z = 19; z < 23; z++) {
+      for (let y = 3; y <= 5; y++) for (let x = 3; x <= 5; x++) {
+        const isCore = (z === 20 || z === 21) && (x === 4 || y === 4);
+        if (isCore) put(z, y, x, 255, 232, 140, 1);
+        else put(z, y, x, 54, 62, 78);
+      }
+    }
+    put(23, 4, 4, 54, 62, 78);
+  }),
+
+  // Glowing cyberpunk neon vending kiosk
+  kiosk: makeProceduralVolume(12, 10, 18, (put) => {
+    for (let z = 0; z < 17; z++) {
+      for (let y = 2; y <= 7; y++) for (let x = 2; x <= 9; x++) {
+        const isFront = y === 7 && x >= 3 && x <= 8 && z >= 5 && z <= 13;
+        const isHeader = y === 7 && x >= 3 && x <= 8 && z >= 14 && z <= 15;
+        if (isHeader) put(z, y, x, 255, 76, 178, 1);
+        else if (isFront) put(z, y, x, 80, 236, 255, 1);
+        else put(z, y, x, 46, 56, 78);
+      }
+    }
+    for (let y = 1; y <= 8; y++) for (let x = 1; x <= 10; x++) put(17, y, x, 72, 86, 112);
+  }),
+
+  // Reflective traffic bollard
+  bollard: makeProceduralVolume(6, 6, 8, (put) => {
+    for (let z = 0; z < 7; z++) {
+      for (let y = 2; y <= 3; y++) for (let x = 2; x <= 3; x++) {
+        if (z === 5) put(z, y, x, 255, 130, 50, 1);
+        else put(z, y, x, 58, 66, 80);
+      }
+    }
+  }),
+
+  // Mossy meadow rock
+  rock: makeProceduralVolume(10, 10, 7, (put) => {
+    for (let z = 0; z < 7; z++) {
+      const r = 4.2 - z * 0.55;
+      for (let y = 1; y < 9; y++) for (let x = 1; x < 9; x++) {
+        const d = Math.hypot((x - 4.5) * 0.9, (y - 4.5) * 1.15);
+        if (d <= r) {
+          if (z >= 4 && ((x + y) & 1)) put(z, y, x, 86, 140, 78);
+          else put(z, y, x, 128 + z * 5, 134 + z * 5, 146 + z * 4);
+        }
+      }
+    }
+  }),
+};
+
+// Cache rasterized prop sprites so repeated props (e.g. 4 trees, 4 lamps) rasterize ONCE per angle/light bucket
+function getCachedPropSprite(propKey, vol, angleDeg, squash, spacing) {
+  const qAng = Math.round((((angleDeg % 360) + 360) % 360) / 2) * 2;
+  const qSq = Math.round(squash * 50);
+  const qSp = Math.round(spacing * 10);
+  const qSnow = Math.round(weather.snowCover * 4);
+  const key = `${propKey}|${qAng}|${qSq}|${qSp}|${state.timeOfDay}|${Math.round(state.sunAngle / 3)}|${state.lighting ? 1 : 0}|${state.shadow ? 1 : 0}|${state.outline ? 1 : 0}|${qSnow}`;
+  const hit = propCache.get(key);
+  if (hit) return hit;
+
+  const buf = rasterizeStackIntoScratch({
+    vol,
+    angleDeg: qAng,
+    squash,
+    spacing,
+    maxSlices: vol.n,
+    shadow: state.shadow,
+    outline: state.outline,
+  });
+  const copy = document.createElement("canvas");
+  copy.width = buf.width;
+  copy.height = buf.height;
+  copy.getContext("2d").drawImage(buf, 0, 0);
+  const entry = { canvas: copy, cx: scratch.cx, baseY: scratch.baseY };
+
+  if (propCache.size >= PROP_CACHE_MAX) {
+    const oldest = propCache.keys().next().value;
+    propCache.delete(oldest);
+  }
+  propCache.set(key, entry);
+  return entry;
+}
+
+// ============================================================
+// WEATHER ENGINE: RAIN, WET REFLECTIONS & SNOW CAP
+// ============================================================
+function updateWeather(dt) {
+  weather.time += dt;
+  const targetSnow = state.weather === "snow" ? 1 : 0;
+  const targetWet = state.weather === "rain" ? 1 : 0;
+  weather.snowCover += (targetSnow - weather.snowCover) * Math.min(1, dt * (targetSnow > weather.snowCover ? 0.42 : 1.8));
+  weather.wetness += (targetWet - weather.wetness) * Math.min(1, dt * 2.5);
+  if (Math.abs(targetSnow - weather.snowCover) < 0.005) weather.snowCover = targetSnow;
+  if (Math.abs(targetWet - weather.wetness) < 0.005) weather.wetness = targetWet;
+
+  if (state.weather === "rain") {
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      const b = i * 4;
+      weather.rain[b] -= weather.rain[b + 2] * 0.22 * dt;
+      weather.rain[b + 1] += weather.rain[b + 2] * dt;
+      if (weather.rain[b + 1] > 1.05) {
+        weather.rain[b + 1] -= 1.1;
+        weather.rain[b] = Math.random();
+      }
+      if (weather.rain[b] < -0.05) weather.rain[b] += 1.1;
+    }
+    for (let i = 0; i < RIPPLE_COUNT; i++) {
+      const b = i * 4;
+      weather.ripples[b + 2] += dt * 1.35;
+      if (weather.ripples[b + 2] >= 1) {
+        weather.ripples[b] = Math.random();
+        weather.ripples[b + 1] = 0.28 + Math.random() * 0.68;
+        weather.ripples[b + 2] = 0;
+        weather.ripples[b + 3] = 4 + Math.floor(Math.random() * 4);
+      }
+    }
+  } else if (state.weather === "snow") {
+    for (let i = 0; i < SNOW_COUNT; i++) {
+      const b = i * 4;
+      weather.snow[b] += Math.sin(weather.time * 1.4 + weather.snow[b + 3]) * 0.045 * dt;
+      weather.snow[b + 1] += weather.snow[b + 2] * dt;
+      if (weather.snow[b + 1] > 1.04) {
+        weather.snow[b + 1] -= 1.08;
+        weather.snow[b] = Math.random();
+      }
+      if (weather.snow[b] < 0) weather.snow[b] += 1;
+      if (weather.snow[b] > 1) weather.snow[b] -= 1;
+    }
+  }
+}
+
+// Draw crisp wavy upside-down wet reflection of a rasterized sprite canvas
+function drawWetReflection(targetCtx, srcCanvas, dstX, dstY, s, baseY, alpha) {
+  if (alpha <= 0.02) return;
+  const sw = srcCanvas.width;
+  const reflH = Math.min(srcCanvas.height - 2, Math.max(8, Math.round(baseY * 0.92)));
+  if (reflH <= 0) return;
+
+  targetCtx.save();
+  targetCtx.imageSmoothingEnabled = false;
+  targetCtx.globalAlpha = alpha;
+  const phase = weather.time * 5.2;
+  // Draw in 2-art-pixel horizontal strips with subtle sine ripple
+  for (let row = 0; row < reflH; row += 2) {
+    const srcY = baseY - row - 2;
+    if (srcY < 0 || srcY + 2 > srcCanvas.height) continue;
+    const wave = Math.round(Math.sin(row * 0.42 + phase) * (0.6 + row * 0.03));
+    const fade = 1 - row / reflH;
+    targetCtx.globalAlpha = alpha * fade;
+    targetCtx.drawImage(
+      srcCanvas,
+      0, srcY, sw, 2,
+      dstX + wave * s, dstY + (baseY + Math.round(row * 0.72)) * s, sw * s, 2 * s
+    );
+  }
+  targetCtx.restore();
+}
+
+function drawWeatherGroundEffects(targetCtx, aw, ah, s, env) {
+  if (state.weather !== "rain") return;
+  targetCtx.fillStyle = env.nightW > 0.45 ? "rgba(130, 185, 255, 0.34)" : "rgba(100, 130, 170, 0.28)";
+  for (let i = 0; i < RIPPLE_COUNT; i++) {
+    const b = i * 4;
+    const age = weather.ripples[b + 2];
+    const rx = Math.round(weather.ripples[b] * aw);
+    const ry = Math.round(weather.ripples[b + 1] * ah);
+    const r = Math.max(1, Math.round(age * weather.ripples[b + 3]));
+    const rh = Math.max(1, Math.round(r * state.squash * 0.65));
+    // Crisp pixel diamond/ring ripple
+    targetCtx.fillRect((rx - r) * s, ry * s, s, s);
+    targetCtx.fillRect((rx + r) * s, ry * s, s, s);
+    targetCtx.fillRect(rx * s, (ry - rh) * s, s, s);
+    targetCtx.fillRect(rx * s, (ry + rh) * s, s, s);
+  }
+}
+
+function drawWeatherOverlay(targetCtx, aw, ah, s, env) {
+  if (state.weather === "rain") {
+    targetCtx.fillStyle = env.nightW > 0.45 ? "rgba(160, 210, 255, 0.45)" : "rgba(120, 150, 195, 0.42)";
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      const b = i * 4;
+      const rx = Math.round(weather.rain[b] * aw);
+      const ry = Math.round(weather.rain[b + 1] * ah);
+      const len = weather.rain[b + 3] | 0;
+      for (let k = 0; k < len; k++) {
+        targetCtx.fillRect((rx - (k >> 1)) * s, (ry + k) * s, s, s);
+      }
+    }
+  } else if (state.weather === "snow") {
+    targetCtx.fillStyle = env.nightW > 0.45 ? "rgba(225, 240, 255, 0.85)" : "rgba(255, 255, 255, 0.92)";
+    for (let i = 0; i < SNOW_COUNT; i++) {
+      const b = i * 4;
+      const sx = Math.round(weather.snow[b] * aw);
+      const sy = Math.round(weather.snow[b + 1] * ah);
+      const sz = (i & 3) === 0 ? 2 : 1;
+      targetCtx.fillRect(sx * s, sy * s, sz * s, sz * s);
+    }
+  }
+}
+
+// ============================================================
+// LIVING DIORAMA + MULTI-ASSET WORLD RENDERER
+// ============================================================
+function getSceneLayout(sceneName) {
+  if (sceneName === "street") {
+    return [
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: -34, y: -26, rot: 0 },
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 34, y: -26, rot: 0 },
+      { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 2, y: -30, rot: 0 },
+      { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: -36, y: 24, rot: 0 },
+      { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: 36, y: 24, rot: 0 },
+      { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 0, y: 30, rot: 180 },
+    ];
+  }
+  // Meadow Island
+  return [
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -30, y: -22, rot: 0 },
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 28, y: -24, rot: 90 },
+    { key: "pine", vol: PROCEDURAL_PROPS.pine, x: -24, y: 24, rot: 180 },
+    { key: "rock", vol: PROCEDURAL_PROPS.rock, x: 26, y: 20, rot: 45 },
+    { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 20, y: -10, rot: 0 },
+  ];
+}
+
+function drawDioramaGround(targetCtx, aw, ah, cx, cy, s, ca, sa, squash, env, sceneName) {
+  const half = 54;
+  const wet = weather.wetness;
+  const snow = weather.snowCover;
+  const nW = env.nightW;
+  const sW = env.sunsetW;
+
+  // Draw rotated pixel-art ground plinth / road directly onto a tiny art-pixel grid via canvas transform?
+  // Even crisper: draw rotated polygon with integer art-pixel snapped plinth & road markings!
+  const proj = (wx, wy, z = 0) => [
+    Math.round(cx + (wx * ca - wy * sa)) * s,
+    Math.round(cy + (wx * sa + wy * ca) * squash - z) * s,
+  ];
+
+  // Plinth sides (floating diorama slab thickness = 9 art px)
+  const slabH = 9;
+  const corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
+  const topPts = corners.map(([x, y]) => proj(x, y, 0));
+  const botPts = corners.map(([x, y]) => proj(x, y, -slabH));
+
+  // Draw the two front-facing side walls of the diorama plinth
+  const sideColA = sceneName === "street"
+    ? (nW > 0.45 ? "#1b2234" : "#64748b")
+    : (nW > 0.45 ? "#2e2420" : "#8b6343");
+  const sideColB = sceneName === "street"
+    ? (nW > 0.45 ? "#121726" : "#475569")
+    : (nW > 0.45 ? "#211916" : "#6d4c33");
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) & 3;
+    // Draw only the two front-facing side walls of the floating diorama plinth
+    if ((topPts[i][1] + topPts[j][1]) * 0.5 > cy * s) {
+      targetCtx.fillStyle = (i & 1) ? sideColA : sideColB;
+      targetCtx.beginPath();
+      targetCtx.moveTo(topPts[i][0], topPts[i][1]);
+      targetCtx.lineTo(topPts[j][0], topPts[j][1]);
+      targetCtx.lineTo(botPts[j][0], botPts[j][1]);
+      targetCtx.lineTo(botPts[i][0], botPts[i][1]);
+      targetCtx.closePath();
+      targetCtx.fill();
+    }
+  }
+
+  // Top surface fill (adapts to Time of Day, Rain wetness, and Snow accumulation!)
+  let topR, topG, topB;
+  if (sceneName === "street") {
+    topR = lerp(lerp(66, 60, sW), 24, nW);
+    topG = lerp(lerp(74, 58, sW), 30, nW);
+    topB = lerp(lerp(88, 70, sW), 46, nW);
+    if (wet > 0) { topR *= (1 - wet * 0.28); topG *= (1 - wet * 0.24); topB *= (1 - wet * 0.14); }
+  } else {
+    topR = lerp(lerp(108, 128, sW), 34, nW);
+    topG = lerp(lerp(168, 134, sW), 66, nW);
+    topB = lerp(lerp(92, 76, sW), 56, nW);
+  }
+  if (snow > 0) {
+    const snR = lerp(236, 130, nW), snG = lerp(244, 150, nW), snB = lerp(255, 195, nW);
+    topR = lerp(topR, snR, snow * 0.85);
+    topG = lerp(topG, snG, snow * 0.85);
+    topB = lerp(topB, snB, snow * 0.85);
+  }
+  targetCtx.fillStyle = `rgb(${topR | 0},${topG | 0},${topB | 0})`;
+  targetCtx.beginPath();
+  targetCtx.moveTo(topPts[0][0], topPts[0][1]);
+  targetCtx.lineTo(topPts[1][0], topPts[1][1]);
+  targetCtx.lineTo(topPts[2][0], topPts[2][1]);
+  targetCtx.lineTo(topPts[3][0], topPts[3][1]);
+  targetCtx.closePath();
+  targetCtx.fill();
+
+  // Street sidewalks + dashed center line OR Meadow dirt path
+  const fillQuad = (x0, y0, x1, y1, color) => {
+    const p0 = proj(x0, y0), p1 = proj(x1, y0), p2 = proj(x1, y1), p3 = proj(x0, y1);
+    targetCtx.fillStyle = color;
+    targetCtx.beginPath();
+    targetCtx.moveTo(p0[0], p0[1]); targetCtx.lineTo(p1[0], p1[1]);
+    targetCtx.lineTo(p2[0], p2[1]); targetCtx.lineTo(p3[0], p3[1]);
+    targetCtx.closePath();
+    targetCtx.fill();
+  };
+
+  if (sceneName === "street") {
+    const curbCol = snow > 0.5
+      ? (nW > 0.45 ? "#9ab0d4" : "#eef4ff")
+      : (nW > 0.45 ? "#2d3852" : "#94a3b8");
+    fillQuad(-half, -half, half, -20, curbCol);
+    fillQuad(-half, 20, half, half, curbCol);
+    // Dashed center lane markers
+    const dashCol = nW > 0.45 ? "rgba(255, 224, 120, 0.72)" : "rgba(255, 236, 150, 0.85)";
+    for (let dx = -44; dx <= 34; dx += 18) {
+      fillQuad(dx, -1.5, dx + 9, 1.5, dashCol);
+    }
+  } else {
+    const pathCol = snow > 0.5
+      ? (nW > 0.45 ? "#7a8fb4" : "#dde7f5")
+      : (nW > 0.45 ? "#463a34" : "#c7a97b");
+    fillQuad(-half, -12, half, 12, pathCol);
+  }
+}
+
+function drawSceneFrame() {
+  const rect = stage.getBoundingClientRect();
+  const s = Math.max(2, Math.min(7, state.scale));
+  const aw = Math.max(150, Math.min(300, Math.floor(rect.width / s)));
+  const ah = Math.max(115, Math.min(220, Math.floor(rect.height / s)));
+  const cw = aw * s, ch = ah * s;
+  if (canvas.width !== cw || canvas.height !== ch) {
+    canvas.width = cw;
+    canvas.height = ch;
+  }
+
+  const env = getLightingEnv(state.timeOfDay, state.sunAngle);
+  const cx = aw >> 1;
+  const cy = Math.round(ah * 0.57);
+  const rad = (state.angle * Math.PI) / 180;
+  const ca = Math.cos(rad), sa = Math.sin(rad);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = env.bgHex;
+  ctx.fillRect(0, 0, cw, ch);
+
+  // 1. Draw diorama plinth & ground
+  drawDioramaGround(ctx, aw, ah, cx, cy, s, ca, sa, state.squash, env, state.scene);
+
+  // 2. Ground rain ripples
+  drawWeatherGroundEffects(ctx, aw, ah, s, env);
+
+  // 3. Gather hero + procedural props + user-dropped extra props, then Y-sort by rotated screen depth!
+  const items = [];
+  items.push({ kind: "hero", x: 0, y: 0, rot: 0, vol: state.vol, key: "hero" });
+  const layout = getSceneLayout(state.scene);
+  for (let i = 0; i < layout.length; i++) {
+    const p = layout[i];
+    items.push({ kind: "prop", x: p.x, y: p.y, rot: p.rot, vol: p.vol, key: p.key });
+  }
+  for (let i = 0; i < state.userProps.length; i++) {
+    const up = state.userProps[i];
+    items.push({ kind: "prop", x: up.x, y: up.y, rot: up.rot, vol: up.vol, key: `u${i}_${up.name}` });
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    it.sx = cx + (it.x * ca - it.y * sa);
+    it.sy = cy + (it.x * sa + it.y * ca) * state.squash;
+  }
+  items.sort((a, b) => a.sy - b.sy);
+
+  // 4. Draw wet reflections + stacked sprites back-to-front
+  const reflAlpha = weather.wetness * (state.scene === "street" ? (env.nightW > 0.45 ? 0.52 : 0.36) : 0.24);
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    let imgCanvas, icx, ibaseY;
+    if (it.kind === "hero") {
+      imgCanvas = rasterizeStackIntoScratch({
+        vol: state.vol,
+        angleDeg: state.angle,
+        squash: state.squash,
+        spacing: state.spacing,
+        maxSlices: state.slices,
+        shadow: state.shadow,
+        outline: state.outline,
+      });
+      icx = scratch.cx;
+      ibaseY = scratch.baseY;
+    } else {
+      const cached = getCachedPropSprite(it.key, it.vol, state.angle + it.rot, state.squash, state.spacing);
+      imgCanvas = cached.canvas;
+      icx = cached.cx;
+      ibaseY = cached.baseY;
+    }
+    const ox = Math.round(it.sx - icx) * s;
+    const oy = Math.round(it.sy - ibaseY) * s;
+    if (reflAlpha > 0.02) {
+      drawWetReflection(ctx, imgCanvas, ox, oy, s, ibaseY, reflAlpha);
+    }
+    ctx.drawImage(imgCanvas, ox, oy, imgCanvas.width * s, imgCanvas.height * s);
+  }
+
+  // 5. Weather foreground streaks / snowflakes
+  drawWeatherOverlay(ctx, aw, ah, s, env);
+
+  const label = state.scene === "street" ? "Neon Street" : "Meadow Island";
+  const extra = state.userProps.length ? ` · +${state.userProps.length} prop${state.userProps.length > 1 ? "s" : ""}` : "";
+  readout.textContent = `${label}${extra} · ${Math.round(((state.angle % 360) + 360) % 360)}° · ${state.lastRenderMs.toFixed(1)}ms`;
 }
 
 // ============================================================
@@ -918,23 +1534,65 @@ function drawDriveFrame() {
   const env = getLightingEnv(state.timeOfDay, state.sunAngle);
   const cx = aw >> 1;
   const cy = (ah >> 1) + 10;
+  const world = state.driveWorld;
+  const snow = weather.snowCover;
+  const wet = weather.wetness;
 
-  // Draw scrolling ground tile grid in art-pixel space
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = env.bgHex;
+  // Ground fill adapted to Drive World, Time of Day, Rain wetness & Snow
+  if (world === "street") {
+    let r = lerp(lerp(66, 58, env.sunsetW), 22, env.nightW);
+    let g = lerp(lerp(74, 56, env.sunsetW), 28, env.nightW);
+    let b = lerp(lerp(88, 68, env.sunsetW), 44, env.nightW);
+    if (wet > 0) { r *= (1 - wet * 0.28); g *= (1 - wet * 0.24); b *= (1 - wet * 0.14); }
+    if (snow > 0) { r = lerp(r, lerp(230, 120, env.nightW), snow * 0.65); g = lerp(g, lerp(238, 138, env.nightW), snow * 0.65); b = lerp(b, lerp(250, 182, env.nightW), snow * 0.65); }
+    ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+  } else if (world === "island") {
+    let r = lerp(lerp(106, 124, env.sunsetW), 32, env.nightW);
+    let g = lerp(lerp(164, 130, env.sunsetW), 62, env.nightW);
+    let b = lerp(lerp(90, 74, env.sunsetW), 54, env.nightW);
+    if (snow > 0) { r = lerp(r, lerp(236, 130, env.nightW), snow * 0.85); g = lerp(g, lerp(244, 150, env.nightW), snow * 0.85); b = lerp(b, lerp(255, 195, env.nightW), snow * 0.85); }
+    ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+  } else {
+    ctx.fillStyle = env.bgHex;
+  }
   ctx.fillRect(0, 0, cw, ch);
 
-  const gridStep = 24;
-  const offX = ((-drive.x % gridStep) + gridStep) % gridStep;
-  const offY = ((-drive.y % gridStep) + gridStep) % gridStep;
-  ctx.fillStyle = env.nightW > 0.45 ? "rgba(120,145,205,0.16)" : "rgba(100,116,139,0.16)";
-  for (let gy = offY * state.squash; gy < ah; gy += gridStep * state.squash) {
-    const py = Math.round(gy) * s;
-    for (let gx = offX; gx < aw; gx += gridStep) {
-      ctx.fillRect(Math.round(gx) * s, py, 2 * s, s);
-      ctx.fillRect(Math.round(gx) * s, py, s, 2 * s);
+  if (world === "street") {
+    // Infinite scrolling horizontal boulevard with curbs and dashed center line
+    const roadBand = 128;
+    const offX = ((-drive.x % 24) + 24) % 24;
+    const relRoadY = ((-drive.y % roadBand) + roadBand) % roadBand;
+    const curbCol = snow > 0.5 ? (env.nightW > 0.45 ? "#9ab0d4" : "#eef4ff") : (env.nightW > 0.45 ? "#2c3752" : "#94a3b8");
+    const dashCol = env.nightW > 0.45 ? "rgba(255,224,120,0.68)" : "rgba(255,236,150,0.82)";
+    for (let baseRow = relRoadY - roadBand; baseRow < ah / state.squash + roadBand; baseRow += roadBand) {
+      const topCurbY = Math.round((baseRow - 44) * state.squash);
+      const botCurbY = Math.round((baseRow + 26) * state.squash);
+      ctx.fillStyle = curbCol;
+      ctx.fillRect(0, topCurbY * s, cw, Math.max(2, Math.round(18 * state.squash)) * s);
+      ctx.fillRect(0, botCurbY * s, cw, Math.max(2, Math.round(18 * state.squash)) * s);
+      const dashY = Math.round(baseRow * state.squash) * s;
+      ctx.fillStyle = dashCol;
+      for (let gx = offX - 24; gx < aw + 24; gx += 24) {
+        ctx.fillRect(Math.round(gx) * s, dashY, 10 * s, 2 * s);
+      }
+    }
+  } else {
+    const gridStep = 24;
+    const offX = ((-drive.x % gridStep) + gridStep) % gridStep;
+    const offY = ((-drive.y % gridStep) + gridStep) % gridStep;
+    ctx.fillStyle = env.nightW > 0.45 ? "rgba(120,145,205,0.16)" : "rgba(100,116,139,0.16)";
+    for (let gy = offY * state.squash; gy < ah; gy += gridStep * state.squash) {
+      const py = Math.round(gy) * s;
+      for (let gx = offX; gx < aw; gx += gridStep) {
+        ctx.fillRect(Math.round(gx) * s, py, 2 * s, s);
+        ctx.fillRect(Math.round(gx) * s, py, s, 2 * s);
+      }
     }
   }
+
+  // Ground rain ripples
+  drawWeatherGroundEffects(ctx, aw, ah, s, env);
 
   // Draw tire skid marks on ground
   ctx.fillStyle = env.nightW > 0.45 ? "rgba(4,6,12,0.75)" : "rgba(30,36,46,0.38)";
@@ -950,8 +1608,7 @@ function drawDriveFrame() {
   // Draw headlight cones on ground at sunset/night
   if (state.lighting && env.emisGlow > 0.1) {
     const fx = Math.cos(drive.heading), fy = Math.sin(drive.heading);
-    const rx = -fy, ry = fx;
-    ctx.fillStyle = `rgba(255, 240, 175, ${(env.emisGlow * 0.22).toFixed(2)})`;
+    ctx.fillStyle = `rgba(255, 240, 175, ${(env.emisGlow * (0.22 + wet * 0.12)).toFixed(2)})`;
     for (let d = 12; d <= 44; d += 5) {
       const spread = 3 + d * 0.22;
       const hx = cx + fx * d;
@@ -976,20 +1633,72 @@ function drawDriveFrame() {
     ctx.fillRect(px * s, py * s, sz * s, sz * s);
   }
 
-  // Rasterize the vehicle stack with dynamic lean & bounce
+  // Gather Y-sorted world props (tiling seamlessly around vehicle) + vehicle itself!
+  const drawList = [{ kind: "hero", sx: cx, sy: cy }];
+  if (world !== "grid") {
+    const tileX = 128, tileY = 128;
+    const tileProps = world === "street"
+      ? [
+          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 24, y: -34, rot: 0 },
+          { key: "kiosk", vol: PROCEDURAL_PROPS.kiosk, x: 86, y: -36, rot: 0 },
+          { key: "bollard", vol: PROCEDURAL_PROPS.bollard, x: 56, y: 34, rot: 0 },
+          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 108, y: 36, rot: 180 },
+        ]
+      : [
+          { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 22, y: 24, rot: 0 },
+          { key: "pine", vol: PROCEDURAL_PROPS.pine, x: 92, y: 34, rot: 90 },
+          { key: "rock", vol: PROCEDURAL_PROPS.rock, x: 58, y: 88, rot: 30 },
+          { key: "lamp", vol: PROCEDURAL_PROPS.lamp, x: 104, y: 98, rot: 0 },
+        ];
+    const baseTx = Math.floor(drive.x / tileX);
+    const baseTy = Math.floor(drive.y / tileY);
+    for (let ty = baseTy - 1; ty <= baseTy + 1; ty++) {
+      for (let tx = baseTx - 1; tx <= baseTx + 1; tx++) {
+        for (let i = 0; i < tileProps.length; i++) {
+          const p = tileProps[i];
+          const wx = tx * tileX + p.x;
+          const wy = ty * tileY + p.y;
+          const sx = cx + (wx - drive.x);
+          const sy = cy + (wy - drive.y) * state.squash;
+          if (sx < -28 || sx > aw + 28 || sy < -28 || sy > ah + 36) continue;
+          drawList.push({ kind: "prop", key: p.key, vol: p.vol, rot: p.rot, sx, sy });
+        }
+      }
+    }
+  }
+  drawList.sort((a, b) => a.sy - b.sy);
+
   const spacing = Math.max(0.4, state.spacing + drive.bounce * 0.25);
-  const buf = rasterizeStackIntoScratch({
-    angleDeg: state.angle,
-    squash: state.squash,
-    spacing,
-    maxSlices: state.slices,
-    shadow: state.shadow,
-    outline: state.outline,
-    leanX: drive.lean,
-  });
-  const ox = Math.round(cx - scratch.cx) * s;
-  const oy = Math.round(cy - scratch.baseY) * s;
-  ctx.drawImage(buf, ox, oy, buf.width * s, buf.height * s);
+  const reflAlpha = wet * (world === "street" ? (env.nightW > 0.45 ? 0.52 : 0.36) : 0.24);
+  for (let i = 0; i < drawList.length; i++) {
+    const it = drawList[i];
+    if (it.kind === "hero") {
+      const buf = rasterizeStackIntoScratch({
+        angleDeg: state.angle,
+        squash: state.squash,
+        spacing,
+        maxSlices: state.slices,
+        shadow: state.shadow,
+        outline: state.outline,
+        leanX: drive.lean,
+      });
+      const ox = Math.round(it.sx - scratch.cx) * s;
+      const oy = Math.round(it.sy - scratch.baseY) * s;
+      if (reflAlpha > 0.02) drawWetReflection(ctx, buf, ox, oy, s, scratch.baseY, reflAlpha);
+      ctx.drawImage(buf, ox, oy, buf.width * s, buf.height * s);
+    } else {
+      // Cached! Zero per-frame rasterization when driving!
+      const cached = getCachedPropSprite(it.key, it.vol, it.rot, state.squash, state.spacing);
+      const ox = Math.round(it.sx - cached.cx) * s;
+      const oy = Math.round(it.sy - cached.baseY) * s;
+      if (reflAlpha > 0.02) drawWetReflection(ctx, cached.canvas, ox, oy, s, cached.baseY, reflAlpha * 0.85);
+      ctx.drawImage(cached.canvas, ox, oy, cached.canvas.width * s, cached.canvas.height * s);
+    }
+  }
+
+  // Weather foreground rain/snow
+  drawWeatherOverlay(ctx, aw, ah, s, env);
+
   readout.textContent = `${Math.round(drive.speed)} px/s${drive.drifting ? " · DRIFT" : ""} · ${state.lastRenderMs.toFixed(1)}ms`;
 }
 
@@ -1140,6 +1849,12 @@ function drawFrame() {
   const s = state.scale;
   const env = getLightingEnv(state.timeOfDay, state.sunAngle);
 
+  if (state.mode === "scene") {
+    drawSceneFrame();
+    state.lastRenderMs = performance.now() - t0;
+    return;
+  }
+
   if (state.mode === "play") {
     if (state.toy === "drive") {
       drawDriveFrame();
@@ -1256,7 +1971,12 @@ function drawFrame() {
   }
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, cw, ch);
+  drawWeatherGroundEffects(ctx, buf.width, buf.height, s, env);
+  if (weather.wetness > 0.02) {
+    drawWetReflection(ctx, buf, 0, 0, s, scratch.baseY, weather.wetness * (env.nightW > 0.45 ? 0.5 : 0.34));
+  }
   ctx.drawImage(buf, 0, 0, cw, ch);
+  drawWeatherOverlay(ctx, buf.width, buf.height, s, env);
   state.lastRenderMs = performance.now() - t0;
   readout.textContent = `${Math.round(((state.angle % 360) + 360) % 360)}° · squash ${state.squash.toFixed(2)} · spacing ${spacing.toFixed(2)} · ${state.lastRenderMs.toFixed(1)}ms`;
 }
@@ -1268,6 +1988,10 @@ function tick(now) {
 
   if (state.vol) {
     let needsDraw = state.dirty;
+    if (state.weather !== "clear" || weather.snowCover > 0 || weather.wetness > 0) {
+      updateWeather(dt);
+      needsDraw = true;
+    }
     if (state.mode === "play") {
       if (state.toy === "drive") {
         updateDrive(dt);
@@ -1284,8 +2008,8 @@ function tick(now) {
         }
       }
     } else if (state.playing) {
-      if (state.mode === "turntable") {
-        state.angle = (state.angle + dt * 55) % 360;
+      if (state.mode === "turntable" || state.mode === "scene") {
+        state.angle = (state.angle + dt * (state.mode === "scene" ? 26 : 55)) % 360;
         els.angle.value = String(Math.round(state.angle));
         els.angleOut.textContent = `${Math.round(state.angle)}°`;
         needsDraw = true;
@@ -1310,7 +2034,7 @@ function tick(now) {
 // Pointer drag to orbit & tilt (Shift+drag moves sun; click in Shatter mode shatters/rebuilds)
 let drag = null;
 stage.addEventListener("pointerdown", (e) => {
-  if (e.target.closest(".toy-bar")) return;
+  if (e.target.closest(".toy-bar") || e.target.closest(".scene-bar")) return;
   if (state.mode === "play" && state.toy === "shatter" && !e.shiftKey) {
     triggerShatter();
     return;
@@ -1321,7 +2045,7 @@ stage.addEventListener("pointerdown", (e) => {
     angle: state.angle, squash: state.squash,
     sun: state.sunAngle, shift: e.shiftKey,
   };
-  if (state.mode === "turntable" && !e.shiftKey) {
+  if ((state.mode === "turntable" || state.mode === "scene") && !e.shiftKey) {
     state.playing = false;
     els.play.textContent = "Play";
   }
@@ -1346,7 +2070,11 @@ stage.addEventListener("pointerup", () => { drag = null; });
 
 function syncPlayUI() {
   const isPlay = state.mode === "play";
+  const isScene = state.mode === "scene";
   toyBar.classList.toggle("visible", isPlay);
+  sceneBar.classList.toggle("visible", isScene);
+  driveWorldGroup.style.display = isPlay && state.toy === "drive" ? "inline-flex" : "none";
+  clearPropsBtn.style.display = state.userProps.length > 0 ? "inline-block" : "none";
   stage.classList.toggle("play-drive", isPlay && state.toy === "drive");
   stage.classList.toggle("play-shatter", isPlay && state.toy === "shatter");
   if (state.toy === "drive") toyHint.textContent = "WASD / Arrows · Space drift";
@@ -1368,6 +2096,39 @@ document.querySelectorAll("[data-mode]").forEach((btn) => {
     syncPlayUI();
     state.dirty = true;
   });
+});
+
+document.querySelectorAll("[data-scene]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.scene = btn.dataset.scene;
+    document.querySelectorAll("[data-scene]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    state.dirty = true;
+  });
+});
+
+document.querySelectorAll("[data-drive-world]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.driveWorld = btn.dataset.driveWorld;
+    document.querySelectorAll("[data-drive-world]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    state.dirty = true;
+  });
+});
+
+document.querySelectorAll("[data-weather]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.weather = btn.dataset.weather;
+    document.querySelectorAll("[data-weather]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    if (state.weather === "rain" && weather.wetness < 0.35) weather.wetness = 0.55;
+    if (state.weather === "snow" && weather.snowCover < 0.25) weather.snowCover = 0.35;
+    state.dirty = true;
+  });
+});
+
+clearPropsBtn.addEventListener("click", () => {
+  state.userProps = [];
+  propCache.clear();
+  syncPlayUI();
+  state.dirty = true;
 });
 
 document.querySelectorAll("[data-toy]").forEach((btn) => {
@@ -1483,7 +2244,33 @@ els.exportBtn.addEventListener("click", () => {
   a.click();
 });
 
-// File load / drag-drop
+// File load / drag-drop (supports multi-PNG diorama drops and + Add Prop)
+async function addPropFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = await loadImage(url);
+  // Infer slice count from aspect ratio if height divides width cleanly, else fall back to current slices
+  const guessed = img.height > 0 && img.width >= img.height * 2
+    ? Math.max(1, Math.round(img.width / img.height))
+    : state.slices;
+  const vol = extractVolumeFromImage(img, guessed, false);
+  if (!vol) return;
+  const slots = [[-26, 2], [26, 4], [-18, -16], [18, 16], [-32, -12], [32, -12]];
+  const slot = slots[state.userProps.length % slots.length];
+  state.userProps.push({
+    name: file.name.replace(/\.[^.]+$/, ""),
+    vol,
+    x: slot[0],
+    y: slot[1],
+    rot: (state.userProps.length * 45) % 360,
+  });
+  if (state.mode !== "scene") {
+    state.mode = "scene";
+    document.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === "scene")));
+  }
+  syncPlayUI();
+  state.dirty = true;
+}
+
 async function loadFile(file) {
   const url = URL.createObjectURL(file);
   const img = await loadImage(url);
@@ -1493,15 +2280,31 @@ async function loadFile(file) {
   titleText.textContent = file.name.replace(/\.[^.]+$/, "");
   extractSlices(img, state.slices);
 }
-document.getElementById("fileInput").addEventListener("change", (e) => {
-  if (e.target.files[0]) loadFile(e.target.files[0]);
+
+document.getElementById("fileInput").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  await loadFile(files[0]);
+  for (let i = 1; i < files.length; i++) await addPropFile(files[i]);
+});
+document.getElementById("propInput").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  for (const f of files) await addPropFile(f);
+  e.target.value = "";
 });
 window.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
 window.addEventListener("dragleave", (e) => { if (e.target === document.documentElement) document.body.classList.remove("dragging"); });
-window.addEventListener("drop", (e) => {
+window.addEventListener("drop", async (e) => {
   e.preventDefault();
   document.body.classList.remove("dragging");
-  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  const files = Array.from(e.dataTransfer.files || []);
+  if (!files.length) return;
+  if (e.shiftKey || state.mode === "scene") {
+    for (const f of files) await addPropFile(f);
+  } else {
+    await loadFile(files[0]);
+    for (let i = 1; i < files.length; i++) await addPropFile(files[i]);
+  }
 });
 
 async function init() {

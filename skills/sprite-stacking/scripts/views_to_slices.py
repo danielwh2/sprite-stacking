@@ -233,6 +233,14 @@ def match_top(top: np.ndarray, side: np.ndarray) -> str:
     return "down" if (dark * tall_mask).sum() >= (dark[::-1] * tall_mask).sum() else "up"
 
 
+def _edge_row(view: np.ndarray, row: int, length: int) -> np.ndarray | None:
+    xs = np.nonzero(view[row, :, 3])[0]
+    if len(xs) == 0:
+        return None
+    idx = np.clip(np.arange(length), int(xs[0]), int(xs[-1]))
+    return view[row, idx, :3]
+
+
 def carve(
     top: np.ndarray,
     side: np.ndarray,
@@ -244,32 +252,38 @@ def carve(
     """Visual-hull carve into slices [z, y, x, rgba], z=0 on the ground."""
     L, W = top.shape[:2]
     H = side.shape[0]
+    top_mask = top[..., 3] > 0
     occ = np.zeros((H, L, W), dtype=bool)
+    yy_grid = xx_grid = None
     for z in range(H):
         r = H - 1 - z
         along = side[r, :, 3] > 0
         across = (front[r, :, 3] > 0) | (back[r, :, 3] > 0)
-        occ[z] = (top[..., 3] > 0) & along[:, None] & across[None, :]
+        occ[z] = top_mask & along[:, None] & across[None, :]
         if round_ and along.any() and across.any():
             # Lathe: clip the row to the ellipse its side and front spans describe. The hull alone
             # gives (widest top disk) & (square), so a tower narrower than its base carves square.
             ys, xs = np.nonzero(along)[0], np.nonzero(across)[0]
             if not (along[ys[0] : ys[-1] + 1].all() and across[xs[0] : xs[-1] + 1].all()):
                 continue  # a gap in the row means separate posts, ropes or legs: keep them square
+            if yy_grid is None:
+                yy_grid, xx_grid = np.mgrid[0:L, 0:W]
             ry, rx = (ys[-1] - ys[0]) / 2 + 0.5, (xs[-1] - xs[0]) / 2 + 0.5
-            yy, xx = np.mgrid[0:L, 0:W]
-            occ[z] &= ((yy - (ys[0] + ys[-1]) / 2) / ry) ** 2 + ((xx - (xs[0] + xs[-1]) / 2) / rx) ** 2 < 1
+            occ[z] &= ((yy_grid - (ys[0] + ys[-1]) / 2) / ry) ** 2 + ((xx_grid - (xs[0] + xs[-1]) / 2) / rx) ** 2 < 1
 
     vol = np.zeros((H, L, W, 4), dtype=np.uint8)
     covered = np.zeros((L, W), dtype=bool)
     ix = np.arange(W)[None, :].repeat(L, 0)
     iy = np.arange(L)[:, None].repeat(W, 1)
+    top_rgb = top[..., :3]
 
     for z in range(H - 1, -1, -1):
         r = H - 1 - z
         above = covered.copy()
-        covered |= occ[z]
         o = occ[z]
+        covered |= o
+        if not o.any():
+            continue
         d = np.stack(
             [
                 ix - np.maximum.accumulate(np.where(~o, ix, -1), axis=1),
@@ -285,30 +299,44 @@ def carve(
         for dy in range(5):
             for dx in range(5):
                 near_above |= pad_a[dy : dy + L, dx : dx + W]
-        for y, x in zip(*np.nonzero(o)):
-            f = int(face[y, x])
-            # A ledge at most 2px wide beside a higher wall is a stair-step on a steep slope (windshield,
-            # nose, cabin edge). It takes the side/front/back colour, not the top view's, or the hood
-            # colour stripes across the glass.
-            is_steep_step = (not above[y, x]) and (depth[y, x] <= 2) and bool(near_above[y, x])
-            if not above[y, x] and not is_steep_step:
-                c = top[y, x, :3]
-            elif above[y, x] and depth[y, x] > 2 and vol[z + 1, y, x, 3]:
-                c = vol[z + 1, y, x, :3]
-            # Under an overhang z+1 is empty: fall through to this row's colour in the views, never black.
-            else:
-                if f < 2:
-                    c = edge_colour(side, r, int(y))
-                elif f == 2:
-                    c = edge_colour(back, r, int(x))
-                else:
-                    c = edge_colour(front, r, int(x))
-                if c is None:
-                    c = top[y, x, :3]
-            if (above[y, x] or is_steep_step) and depth[y, x] <= 2 and shade:
+
+        # Vectorized per-voxel colouring (matches scalar carve logic exactly)
+        is_steep_step = (~above) & (depth <= 2) & near_above
+        use_top = (~above) & (~is_steep_step)
+        if z + 1 < H:
+            use_above = above & (depth > 2) & (vol[z + 1, :, :, 3] > 0)
+        else:
+            use_above = np.zeros((L, W), dtype=bool)
+
+        side_row = _edge_row(side, r, L)
+        back_row = _edge_row(back, r, W)
+        front_row = _edge_row(front, r, W)
+
+        edge_rgb = top_rgb.copy()
+        if side_row is not None:
+            m = face < 2
+            edge_rgb[m] = np.broadcast_to(side_row[:, None, :], (L, W, 3))[m]
+        if back_row is not None:
+            m = face == 2
+            edge_rgb[m] = np.broadcast_to(back_row[None, :, :], (L, W, 3))[m]
+        if front_row is not None:
+            m = face > 2
+            edge_rgb[m] = np.broadcast_to(front_row[None, :, :], (L, W, 3))[m]
+
+        slice_rgb = np.where(use_top[..., None], top_rgb, edge_rgb)
+        if z + 1 < H:
+            slice_rgb = np.where(use_above[..., None], vol[z + 1, :, :, :3], slice_rgb)
+
+        if shade:
+            shade_mask = (above | is_steep_step) & (depth <= 2) & o
+            if shade_mask.any():
                 factor = 1.0 - shade * (1.0 - z / max(H - 1, 1)) - shade * 0.4
-                c = np.clip(np.asarray(c, dtype=float) * factor, 0, 255)
-            vol[z, y, x] = (*np.asarray(c, dtype=np.uint8), 255)
+                shaded = np.clip(slice_rgb[shade_mask].astype(float) * factor, 0, 255).astype(np.uint8)
+                slice_rgb = slice_rgb.copy()
+                slice_rgb[shade_mask] = shaded
+
+        vol[z, o, :3] = slice_rgb[o]
+        vol[z, o, 3] = 255
     return vol
 
 
