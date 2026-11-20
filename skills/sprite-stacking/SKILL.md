@@ -63,6 +63,7 @@ The slicer keeps a voxel only where every view covers it, so for (c):
 2. **Proportions:** TOP length = SIDE length, TOP width = FRONT/BACK width, SIDE height = FRONT/BACK height.
 3. **Hard edges:** flat fills, crisp outlines. Soft airbrushed edges or thin 1px internal lines smear once slices rotate. Regenerate or redraw rather than salvage.
 4. **Holes:** overhangs that show daylight in the SIDE view (a raised rear wing) survive. Cavities hidden from all four silhouettes (truck beds, hollow arches) fill in. Fix those slices by hand after carving.
+5. **Lessons:** run down the Lessons table at the end of this file.
 
 ## 2. Carve and inspect
 
@@ -124,3 +125,18 @@ Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or
 - [ ] **Clean diagonals:** no horizontal stripes or dark speckle inside the body at 45°.
 - [ ] **Heading:** driving a circle keeps the front on the path; reversing holds heading.
 - [ ] **Slow turns:** if small sprites look choppy, raise the integer display scale first. Try RotSprite only if long straight edges still crawl, and compare by eye: it rounds off tiny sprites.
+- [ ] **Full turn:** watch every angle, not four. A part that appears and disappears is a Lessons row.
+
+## Lessons
+
+When a stack comes out wrong, fix it, then fix the cause where it can't recur: change the slicer so the mistake can't happen, or make it warn with the fix in the message, and add a case to `tests/check.py` built from the real mistake that fails before the change. Only judgment calls code can't see become a rule. Add a row here; delete it once code makes the mistake impossible.
+
+| Date | Mistake | Rule | Enforced by |
+| --- | --- | --- | --- |
+| 2026-11-20 | 1px posts, ropes and antennas blink in and out as the stack turns | Draw thin parts at least 2px wide | Slicer warning (`thin_runs`), check case 5 |
+| 2026-11-20 | A round part narrower than its base (tower, balloon, pot) carves square | Carve with `--round`; it keeps gapped rows like posts square | `--round`, check case 4 |
+| 2026-11-20 | Auto `--top-nose` flips anything that is not a vehicle | Pass `--top-nose down` | Rule |
+| 2026-11-20 | Something sticking out of a wall carves a ledge along the whole wall | Paint small protrusions flat; give a chimney a flat strip of ridge | Rule |
+| 2026-11-20 | Background fully enclosed inside a view (between ropes, fins, legs) carves solid | Every gap must reach the outside of its view | Rule |
+| 2026-11-20 | A base that reaches further on one side makes the stack orbit off-axis | Centre the object in its views | Rule |
+

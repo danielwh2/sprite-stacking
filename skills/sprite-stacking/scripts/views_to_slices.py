@@ -441,6 +441,42 @@ def render_stack_image(
     return Image.fromarray(canvas)
 
 
+def thin_runs(vol: np.ndarray, min_run: int = 3) -> list[tuple[int, int]]:
+    """Slice ranges holding a part with no 2x2 block (a 1px post, rope, antenna or rail) for at
+    least min_run slices in a row. Renderers sample each rotated slice per screen pixel, so such a
+    part drops between pixels at some angles and blinks in and out as the stack turns."""
+    thin = []
+    for s in vol[..., 3] > 0:
+        b = s[:-1, :-1] & s[1:, :-1] & s[:-1, 1:] & s[1:, 1:]
+        block = np.zeros_like(s)
+        for dy in (0, 1):
+            for dx in (0, 1):
+                block[dy : dy + b.shape[0], dx : dx + b.shape[1]] |= b
+        seen, found = np.zeros_like(s), False
+        for y0, x0 in zip(*np.nonzero(s)):
+            if seen[y0, x0] or found:
+                continue
+            stack, seen[y0, x0], solid = [(y0, x0)], True, False
+            while stack:
+                y, x = stack.pop()
+                solid |= bool(block[y, x])
+                for yy, xx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                    if 0 <= yy < s.shape[0] and 0 <= xx < s.shape[1] and s[yy, xx] and not seen[yy, xx]:
+                        seen[yy, xx] = True
+                        stack.append((yy, xx))
+            found = not solid
+        thin.append(found)
+    runs, start = [], None
+    for z, t in enumerate(thin + [False]):
+        if t and start is None:
+            start = z
+        elif not t and start is not None:
+            if z - start >= min_run:
+                runs.append((start, z - 1))
+            start = None
+    return runs
+
+
 def build_preview(vol: np.ndarray, views: list[np.ndarray], out_path: Path) -> None:
     """Save a crisp visual check sheet: 4 views + 4 turntable angles + exploded stack."""
     renders = [
@@ -544,6 +580,9 @@ def main() -> None:
     strip = np.concatenate(list(vol), axis=1)
     Image.fromarray(strip).save(a.out)
     print(f"{vol.shape[0]} slices of {vol.shape[2]} x {vol.shape[1]} px -> {a.out}")
+    for z0, z1 in thin_runs(vol):
+        print(f"warning: slices {z0}-{z1} hold a 1px-thin part; it will blink as the stack turns. "
+              "Draw posts, ropes and antennas at least 2px wide in the views.")
 
     if a.preview:
         a.preview.parent.mkdir(parents=True, exist_ok=True)

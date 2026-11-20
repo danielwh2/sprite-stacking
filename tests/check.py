@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sprite-stacking" / "scripts"))
-from views_to_slices import find_views, remove_background, views_to_slices  # noqa: E402
+from views_to_slices import find_views, remove_background, thin_runs, views_to_slices  # noqa: E402
 
 RED, DRK, TYR, BARK, LEAF = (210, 40, 50), (40, 50, 70), (30, 30, 34), (110, 70, 40), (60, 150, 70)
 
@@ -94,5 +94,17 @@ for round_, want_corner in ((False, True), (True, False)):
     ys, xs = np.nonzero(mid)
     corner = mid[ys.min(), xs.min()]
     assert corner == want_corner, f"round={round_}: tower corner filled={corner}"
+
+# 5. 1px posts are flagged (they blink when rotated); 2px posts and plain domes are not.
+def posts(width):
+    v = np.zeros((12, 12, 12, 4), np.uint8)
+    v[:2, 2:10, 2:10] = (*BARK, 255)  # base
+    v[2:10, 2 : 2 + width, 2 : 2 + width] = (*BARK, 255)
+    v[2:10, 10 - width : 10, 10 - width : 10] = (*BARK, 255)
+    v[10:, 2:10, 2:10] = (*RED, 255)  # roof
+    return v
+
+assert thin_runs(posts(1)) == [(2, 9)], thin_runs(posts(1))
+assert thin_runs(posts(2)) == []
 
 print("ok")
