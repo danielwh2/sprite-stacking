@@ -518,6 +518,98 @@ def build_preview(vol: np.ndarray, views: list[np.ndarray], out_path: Path) -> N
     bg.convert("RGB").save(out_path)
 
 
+def compute_normals(vol: np.ndarray) -> np.ndarray:
+    """Estimate outward 3D unit normals per occupied voxel, packed as RGBA uint8."""
+    occ = (vol[..., 3] > 0).astype(np.float32)
+    p = np.pad(occ, 1, mode="constant", constant_values=0.0)
+
+    def smooth_x(a: np.ndarray) -> np.ndarray:
+        return a[:, :, :-2] + 2.0 * a[:, :, 1:-1] + a[:, :, 2:]
+
+    def smooth_y(a: np.ndarray) -> np.ndarray:
+        return a[:, :-2, :] + 2.0 * a[:, 1:-1, :] + a[:, 2:, :]
+
+    def smooth_z(a: np.ndarray) -> np.ndarray:
+        return a[:-2, :, :] + 2.0 * a[1:-1, :, :] + a[2:, :, :]
+
+    nz = smooth_x(smooth_y(p[:-2, :, :] - p[2:, :, :]))
+    ny = smooth_x(smooth_z(p[:, :-2, :] - p[:, 2:, :]))
+    nx = smooth_y(smooth_z(p[:, :, :-2] - p[:, :, 2:]))
+
+    mag = np.sqrt(nx * nx + ny * ny + nz * nz)
+    zero = mag < 1e-5
+    nz = np.where(zero, 1.0, nz)
+    mag = np.where(zero, 1.0, mag)
+    nx /= mag
+    ny /= mag
+    nz /= mag
+
+    out = np.zeros_like(vol)
+    solid = vol[..., 3] > 0
+    out[solid, 0] = np.clip(np.round((nx[solid] * 0.5 + 0.5) * 255.0), 0, 255).astype(np.uint8)
+    out[solid, 1] = np.clip(np.round((ny[solid] * 0.5 + 0.5) * 255.0), 0, 255).astype(np.uint8)
+    out[solid, 2] = np.clip(np.round((nz[solid] * 0.5 + 0.5) * 255.0), 0, 255).astype(np.uint8)
+    out[solid, 3] = 255
+    return out
+
+
+def detect_emissive(vol: np.ndarray) -> np.ndarray:
+    """Detect small bright/vivid surface accents (headlights, windows, neon) as an RGBA emissive volume."""
+    solid = vol[..., 3] > 0
+    out = np.zeros_like(vol)
+    if not solid.any():
+        return out
+
+    p = np.pad(solid, 1, mode="constant", constant_values=False)
+    surface = solid & ~(
+        p[:-2, 1:-1, 1:-1]
+        & p[2:, 1:-1, 1:-1]
+        & p[1:-1, :-2, 1:-1]
+        & p[1:-1, 2:, 1:-1]
+        & p[1:-1, 1:-1, :-2]
+        & p[1:-1, 1:-1, 2:]
+    )
+    surf_count = int(surface.sum())
+    if surf_count == 0:
+        return out
+
+    rgb = vol[..., :3].astype(np.float32)
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    sat = (max_c - min_c) / np.maximum(max_c, 1.0)
+
+    cand = surface & (
+        ((luma >= 180.0) & ((sat >= 0.30) | (luma >= 232.0)))
+        | ((max_c >= 215.0) & (sat >= 0.62) & (luma >= 110.0))
+    )
+    if not cand.any():
+        return out
+
+    # Exclude dominant body colors (> 14% of surface) so a bright red car or white wall doesn't glow.
+    surf_rgb = vol[surface, :3]
+    surf_keys = (
+        (surf_rgb[:, 0].astype(np.uint32) << 16)
+        | (surf_rgb[:, 1].astype(np.uint32) << 8)
+        | surf_rgb[:, 2].astype(np.uint32)
+    )
+    uniq, counts = np.unique(surf_keys, return_counts=True)
+    dominant = set(int(k) for k, c in zip(uniq, counts) if c / surf_count > 0.14)
+
+    cz, cy, cx = np.nonzero(cand)
+    cand_rgb = vol[cz, cy, cx, :3]
+    cand_keys = (
+        (cand_rgb[:, 0].astype(np.uint32) << 16)
+        | (cand_rgb[:, 1].astype(np.uint32) << 8)
+        | cand_rgb[:, 2].astype(np.uint32)
+    )
+    keep = np.array([int(k) not in dominant for k in cand_keys], dtype=bool)
+    if keep.any():
+        out[cz[keep], cy[keep], cx[keep]] = vol[cz[keep], cy[keep], cx[keep]]
+    return out
+
+
 def to_data_uri(arr: np.ndarray) -> str:
     buf = io.BytesIO()
     Image.fromarray(arr).save(buf, format="PNG")
@@ -560,6 +652,8 @@ def main() -> None:
     p.add_argument("--bg-tol", type=int, default=28, help="Color tolerance for flood-fill background removal on opaque sheets")
     p.add_argument("--preview", type=Path, default=None, help="Save a visual verification contact sheet PNG")
     p.add_argument("--html", type=Path, default=None, help="Save a self-contained interactive HTML turntable/scan viewer")
+    p.add_argument("--normals", type=Path, default=None, help="Save a matching 3D normal-map slice strip PNG")
+    p.add_argument("--emissive", type=Path, default=None, help="Save an auto-detected emissive mask slice strip PNG")
     a = p.parse_args()
 
     sheet = np.array(Image.open(a.sheet).convert("RGBA"))
@@ -583,6 +677,18 @@ def main() -> None:
     for z0, z1 in thin_runs(vol):
         print(f"warning: slices {z0}-{z1} hold a 1px-thin part; it will blink as the stack turns. "
               "Draw posts, ropes and antennas at least 2px wide in the views.")
+
+    if a.normals:
+        a.normals.parent.mkdir(parents=True, exist_ok=True)
+        norm_strip = np.concatenate(list(compute_normals(vol)), axis=1)
+        Image.fromarray(norm_strip).save(a.normals)
+        print(f"normals -> {a.normals}")
+
+    if a.emissive:
+        a.emissive.parent.mkdir(parents=True, exist_ok=True)
+        emis_strip = np.concatenate(list(detect_emissive(vol)), axis=1)
+        Image.fromarray(emis_strip).save(a.emissive)
+        print(f"emissive -> {a.emissive}")
 
     if a.preview:
         a.preview.parent.mkdir(parents=True, exist_ok=True)
