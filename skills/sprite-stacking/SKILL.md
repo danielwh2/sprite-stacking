@@ -1,0 +1,122 @@
+---
+name: sprite-stacking
+description: Makes fake-3D rotatable pixel art with sprite stacking. Turns four orthographic views (top, side, front, back) into a visual-hull carved slice strip, checks it, and renders a crisp turntable for web Canvas, Godot, Unity or Phaser. Use when someone asks to "make a rotatable pixel art car", "sprite stacking", "fake 3D pixel art", "pixel art turntable", "stacked slices", "voxel-style 2D sprite", or wants a top-down vehicle, prop, tree or building that turns without drawing every angle.
+---
+
+# Sprite stacking
+
+An object is a horizontal strip of flat top-down slices, ground slice on the left, roof on the right. Draw them bottom to top, each rotated by the same angle, squashed vertically for camera pitch, and lifted 1 px per slice. One small sheet gives every angle in crisp pixels.
+
+Never ship a stack you have not rendered and looked at. Paths below are relative to this skill's folder.
+
+## 0. Pick the path
+
+```
+What do you have?
+├── Slice strip PNG or MagicaVoxel layer export ──▶ Step 3 (Render)
+├── 4-view sheet (top, side, front, back) ────────▶ Step 1 gate ─▶ Step 2 (Carve)
+└── A prompt or an idea ──────────────────────────▶ Step 1 ─▶ Step 2 ─▶ Step 3
+```
+
+In an existing project, read the renderer first: engine, pixel scale, how sprites are drawn and sorted, which objects turn. Fit the stack into that renderer. Never add a second canvas or render pipeline.
+
+## 1. Get a 4-view sheet
+
+The sheet: one 1x4 row in the order TOP, SIDE, FRONT, BACK, on flat white, with clear gaps between views. TOP looks straight down, front pointing down. SIDE has the front pointing left. Same scale in all four.
+
+Pick a tier:
+
+- **Chunky retro:** 15-20 slices, about 25×48 px. Bold silhouettes, 3-4 px stripes, shown at 8-10x.
+- **Detailed hi-bit:** 26-44 slices, 36×72 to 46×107 px. Holds vents, logos, spoked rims, glass reflections, raised spoilers.
+
+Then take the first source that applies.
+
+**a. You have an image generation tool.** Use this prompt. Swap the subject, keep the rest verbatim:
+
+```
+Chunky pixel art orthographic model sheet of [SUBJECT] with rich 3-tone hue-shifted pixel shading (deep cool-shifted shadows, saturated midtones, bright warm top highlights along ridges and edges), bold 3-4px stripes/accents, and crisp specular pixels on glass. Four views in a clean 1x4 horizontal row (or 2x2 grid) on a completely flat solid white or pale gray background:
+1. TOP view looking straight down, front pointing DOWN.
+2. SIDE view, front pointing LEFT.
+3. FRONT view.
+4. BACK view.
+Strictly orthographic: zero perspective, zero tilt, zero 3/4 angle. Identical scale across all four views so length, width, and height match pixel for pixel. Bold 1px dark outline around each view, solid flat color clusters, crisp internal panel shading, zero anti-aliasing, zero soft edges, zero cast ground shadows, zero grid lines, zero text, generous empty space between views.
+```
+
+**b. The user has a sheet.** Use it.
+
+**c. Neither.** Draw the four views yourself as pixel art in a short Python/PIL script at native resolution, one pixel per art pixel (numpy arrays or `ImageDraw`). Give each view a 1px dark outline, keep length, width and height identical across views, upscale 8x with `Image.NEAREST`, and paste them in one row on flat white with at least 40 px between views. Carve it with `--slices` set to the SIDE view's native height including its outline, so the slices land back on your pixels.
+
+The slicer keeps a voxel only where every view covers it, so for (c):
+
+- Round objects (pots, canopies, domes, wheels seen from above) need a pixel circle in the TOP view. A square TOP carves a box.
+- Fins, leaves, wings and any irregular plan need their real outline in the TOP view, or they carve as blocks.
+- The SIDE and FRONT silhouettes set the profile: a rectangle makes a cylinder, so round them for a ball.
+- Wall detail (windows, doors, panel lines) goes in SIDE, FRONT and BACK. Roof detail goes in TOP.
+- Shade with a 3-4 tone hue-shifted ramp: cool deep shadow, saturated mid, warm highlight. No gradients, no anti-aliasing.
+
+### Gate: look at the sheet before slicing
+
+1. **Orientation:** TOP front points down. SIDE front points left (if right, pass `--side-nose right`).
+2. **Proportions:** TOP length = SIDE length, TOP width = FRONT/BACK width, SIDE height = FRONT/BACK height.
+3. **Hard edges:** flat fills, crisp outlines. Soft airbrushed edges or thin 1px internal lines smear once slices rotate. Regenerate or redraw rather than salvage.
+4. **Holes:** overhangs that show daylight in the SIDE view (a raised rear wing) survive. Cavities hidden from all four silhouettes (truck beds, hollow arches) fill in. Fix those slices by hand after carving.
+
+## 2. Carve and inspect
+
+`scripts/views_to_slices.py` needs Python 3 with Pillow and NumPy. It removes the background (transparent or flat), strips the 1px view outlines, quantizes to one shared palette, carves the slices, and writes a check sheet and a standalone viewer.
+
+```bash
+python3 scripts/views_to_slices.py views.png slices.png \
+  --slices 36 --shade 0.2 --preview check.png --html viewer.html
+```
+
+| Flag | Default | When to change it |
+| --- | --- | --- |
+| `--slices N` | auto (36 if the SIDE view is taller than 64 px, else native) | 15-20 chunky, 32-48 hi-bit, native height for drawn sheets, `0` keeps the sheet's raw pixels |
+| `--order` | `auto` | `auto` picks TOP and SIDE by matching proportions (TOP length = SIDE length, TOP width = FRONT width, SIDE height = FRONT height); reading order wins ties. `reading` forces TOP, SIDE, FRONT, BACK |
+| `--side-nose` | `left` | `right` if the SIDE view faces right |
+| `--top-nose` | `auto` | `up` or `down` if auto flips the TOP view |
+| `--shade` | `0.2` | 0.12-0.15 for richly shaded views, 0.25 for flat ones, 0 for none |
+| `--colours` | `24` | 32-48 for detailed liveries, `0` to keep every colour |
+| `--bg-tol` | `28` | Raise a little if JPEG noise leaves a fringe |
+| `--dark-thresh` | `70` | `0` to keep outlines on very dark silhouettes |
+
+Open `check.png` and look at it right after carving: all four extracted views, four turntable angles and the exploded view. Do this before writing any integration code. `viewer.html` opens in a browser with Turntable, Slice scan and Exploded modes, and exports a 16-direction PNG.
+
+## 3. Render: the loop and its numbers
+
+Every renderer runs the same loop, bottom to top:
+
+```js
+// sheet: horizontal strip of `count` slices, each w × h, ground slice at z = 0
+// pos: ground contact centre, rounded to whole pixels
+for (let z = 0; z < count; z++) {
+  // 1. rotate the slice around its centre (-floor(w/2), -floor(h/2)) by `turn`
+  // 2. scale y by `squash` (camera pitch)
+  // 3. lift by -round(z * spacing)
+  // 4. translate to whole-pixel `pos`, draw with nearest filtering
+}
+```
+
+Do not guess these:
+
+- **`spacing = 1.0`** screen px at the art-pixel scale.
+- **`squash = 0.75`** for an angled top-down camera. 1.0 looks straight down; below 0.6 roofs flatten to slivers. For a tilting camera, `squash = sin(elevation)`, `spacing = cos(elevation)`.
+- **Whole-pixel positions.** Fractional `pos` or offsets shimmer on rotation.
+- **Nearest-neighbour filtering.** `imageSmoothingEnabled = false` and `image-rendering: pixelated` on the web, Nearest/Point filter in engines.
+- **Ground shadow:** for vehicles, the union footprint at z = 0, offset +2, +3 art px, drawn before slice 0. For tall props, project the stacked slices along the sun vector per layer, with Bayer 4×4 dithered edges, not a generic oval.
+- **Outline the finished stack once, never per slice.** Per-slice outlines draw seams and speckle through the body. Render into a 1x art-pixel buffer, trace a 1px outline around its alpha, then scale up.
+- **Heading:** the sheet's front points down (+y), so `turn = atan2(vy, vx) - PI / 2`. For anything that reverses, drive `turn` from a stored heading, not raw velocity.
+- **Y-sort whole stacks by ground point.** Never interleave slices of two objects.
+- **Bake static stacks** into plain sprites at load time. 200 trees × 30 slices is 6,000 draws a frame.
+
+Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or Phaser. `scripts/viewer.html` is the complete web reference: buffer, outline, orbit, scan, exploded, export.
+
+## 4. Done when
+
+- [ ] **Straight down:** at `squash = 1`, `turn = 0`, the render is one slice wide and `sliceHeight + count - 1` px tall.
+- [ ] **Pitch and 90°:** 0.75 is visibly shorter than 1.0; at 90° the width equals `sliceHeight`.
+- [ ] **Spacing:** 0 draws flat (top slice only), 2.5 separates every layer cleanly.
+- [ ] **Clean diagonals:** no horizontal stripes or dark speckle inside the body at 45°.
+- [ ] **Heading:** driving a circle keeps the front on the path; reversing holds heading.
+- [ ] **Slow turns:** if small sprites look choppy, raise the integer display scale first. Try RotSprite only if long straight edges still crawl, and compare by eye: it rounds off tiny sprites.
