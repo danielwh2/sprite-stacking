@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Turn four orthographic pixel-art views (top, side, front, back) into a sprite-stacking slice sheet.
 
-Works on both transparent PNGs (SpriteCook / Aseprite) and opaque solid-background sheets
-(Nano Banana / Gemini image generation), in either a 2x2 grid or a 1x4 horizontal row.
+Works on transparent PNGs and on opaque flat-background sheets (generated or hand-drawn),
+in either a 2x2 grid or a 1x4 horizontal row.
 
 Examples:
   python views_to_slices.py sheet.png slices.png --shade 0.25 --preview check.png
-  python views_to_slices.py nb_sheet.png slices.png --slices 36 --shade 0.2 --preview check.png --html viewer.html
+  python views_to_slices.py sheet.png slices.png --slices 36 --shade 0.2 --preview check.png --html viewer.html
 """
 
 from __future__ import annotations
@@ -178,7 +178,11 @@ def strip_outline(v: np.ndarray, dark: int = 70) -> np.ndarray:
         return v
     m = v[..., 3] > 0
     pad = np.pad(m, 1)
-    edge = m & ~(pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:])
+    # 8-neighbour: an outline pixel in a concave corner (stem under a cap) touches empty space only diagonally
+    edge = m & ~(
+        pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:]
+        & pad[:-2, :-2] & pad[:-2, 2:] & pad[2:, :-2] & pad[2:, 2:]
+    )
     line = edge & (v[..., :3].astype(int).sum(-1) / 3 < dark)
     out = v.copy()
     for y, x in zip(*np.nonzero(line)):
@@ -279,8 +283,9 @@ def carve(
             is_steep_step = (not above[y, x]) and (depth[y, x] <= 2) and bool(near_above[y, x])
             if not above[y, x] and not is_steep_step:
                 c = top[y, x, :3]
-            elif above[y, x] and depth[y, x] > 2:
+            elif above[y, x] and depth[y, x] > 2 and vol[z + 1, y, x, 3]:
                 c = vol[z + 1, y, x, :3]
+            # Under an overhang z+1 is empty: fall through to this row's colour in the views, never black.
             else:
                 if f < 2:
                     c = edge_colour(side, r, int(y))
@@ -500,7 +505,7 @@ def main() -> None:
     p.add_argument("--slices", type=int, default=None, help="Target slice count / height (default: auto, 0 = native)")
     p.add_argument("--top-nose", choices=["auto", "up", "down"], default="auto")
     p.add_argument("--side-nose", choices=["left", "right"], default="left")
-    p.add_argument("--order", choices=["auto", "reading"], default="auto", help="auto = by aspect ratio; reading = top,side,front,back")
+    p.add_argument("--order", choices=["auto", "reading"], default="auto", help="auto = match views by proportion; reading = top,side,front,back")
     p.add_argument("--colours", type=int, default=24, help="Shared palette size (0 = keep original colors)")
     p.add_argument("--shade", type=float, default=0.2, help="Darken side faces near ground (0 = flat, 0.2-0.25 = subtle depth)")
     p.add_argument("--dark-thresh", type=int, default=70, help="Luminance cutoff for stripping 1px dark view outlines (0 = disable)")

@@ -75,4 +75,11 @@ red = (vol[..., 0] > 150) & (vol[..., 1] < 80) & (vol[..., 3] > 0)
 cabin = slice(25, 36)
 assert red[cabin].sum() == 0, f"{red[cabin].sum()} body-red pixels on cabin slices"
 
+# 3. No black voxels under an overhang: a cap on a thin stem over a wide base plate.
+cap_side = view(24, 24, [(0, 0, 24, 10, RED), (9, 10, 15, 20, BARK), (0, 20, 24, 24, LEAF)])
+mush = [view(24, 24, [(0, 0, 24, 24, RED)]), cap_side, cap_side.copy(), cap_side.copy()]
+vol, _ = views_to_slices(sheet(mush), slices=26, order="reading")
+dark = (vol[..., :3].astype(int).sum(-1) < 60) & (vol[..., 3] > 0)
+assert dark.sum() == 0, f"{dark.sum()} black voxels under the cap"
+
 print("ok")
