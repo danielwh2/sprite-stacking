@@ -85,8 +85,10 @@ python3 scripts/views_to_slices.py views.png slices.png \
 | `--colours` | `24` | 32-48 for detailed liveries, `0` to keep every colour |
 | `--bg-tol` | `28` | Raise a little if JPEG noise leaves a fringe |
 | `--dark-thresh` | `70` | `0` to keep outlines on very dark silhouettes |
+| `--normals` | *(none)* | Save a matching 3D normal-map slice strip PNG |
+| `--emissive` | *(none)* | Save an auto-detected emissive mask strip PNG |
 
-Open `check.png` and look at it right after carving: all four extracted views, four turntable angles and the exploded view. Do this before writing any integration code. `viewer.html` opens in a browser with Turntable, Slice scan and Exploded modes, and exports a 16-direction PNG.
+Open `check.png` and look at it right after carving: all four extracted views, four turntable angles and the exploded view. Do this before writing any integration code. `viewer.html` opens in a browser with Turntable, Slice scan, Exploded, and Play modes (Drive, Wind, Shatter), live Time of Day (Day → Sunset → Night with auto-emissive glow and projected 3D shadows), and 16-direction PNG export.
 
 ## 3. Render: the loop and its numbers
 

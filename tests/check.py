@@ -7,7 +7,15 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "sprite-stacking" / "scripts"))
-from views_to_slices import find_views, remove_background, thin_runs, views_to_slices  # noqa: E402
+from views_to_slices import (  # noqa: E402
+    build_html_viewer,
+    compute_normals,
+    detect_emissive,
+    find_views,
+    remove_background,
+    thin_runs,
+    views_to_slices,
+)
 
 RED, DRK, TYR, BARK, LEAF = (210, 40, 50), (40, 50, 70), (30, 30, 34), (110, 70, 40), (60, 150, 70)
 
@@ -106,5 +114,34 @@ def posts(width):
 
 assert thin_runs(posts(1)) == [(2, 9)], thin_runs(posts(1))
 assert thin_runs(posts(2)) == []
+
+# 6. 3D normals: shape & alpha match occupancy, top roof points +Z, empty stays 0.
+box_vol = np.zeros((10, 12, 12, 4), np.uint8)
+box_vol[1:9, 2:10, 2:10] = (*DRK, 255)
+norms = compute_normals(box_vol)
+assert norms.shape == box_vol.shape
+assert np.array_equal(norms[..., 3] > 0, box_vol[..., 3] > 0)
+assert norms[8, 6, 6, 2] > 200, f"top center normal z={norms[8, 6, 6, 2]}, expected >200"
+assert norms[0, 6, 6, 3] == 0
+
+# 7. Auto-emissive: detects small bright accents, excludes dominant bright body, handles empty.
+box_vol[4:6, 2, 4:6] = (255, 245, 160, 255)  # headlights
+em = detect_emissive(box_vol)
+assert (em[4:6, 2, 4:6, 3] > 0).all(), "expected headlights to be marked emissive"
+assert (em[8, 6, 6, 3] == 0), "dark body should not be emissive"
+
+bright_body = np.zeros((10, 12, 12, 4), np.uint8)
+bright_body[1:9, 2:10, 2:10] = (250, 250, 250, 255)
+assert (detect_emissive(bright_body)[..., 3] == 0).all(), "dominant white body must not glow"
+assert (detect_emissive(np.zeros((4, 4, 4, 4), np.uint8))[..., 3] == 0).all()
+
+# 8. Viewer HTML embeds live lighting & Play mode controls.
+import tempfile
+with tempfile.TemporaryDirectory() as td:
+    html_path = Path(td) / "viewer.html"
+    build_html_viewer(box_vol, [box_vol[0]] * 4, html_path, "Check")
+    viewer_html = html_path.read_text(encoding="utf-8")
+for needle in ('data-mode="play"', 'data-toy="drive"', 'data-toy="wind"', 'data-toy="shatter"', 'id="timeRange"', 'id="sunRange"'):
+    assert needle in viewer_html, f"missing {needle} in viewer HTML"
 
 print("ok")

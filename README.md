@@ -55,10 +55,12 @@ python3 skills/sprite-stacking/scripts/views_to_slices.py views.png slices.png \
 - `--round`: towers, balloons, pots carve round, not square.
 - `--side-nose right`: the side view faces right.
 - `--colours N`: shared palette size, `0` keeps every colour.
+- `--normals path.png`: save a matching 3D normal-map slice strip.
+- `--emissive path.png`: save an auto-detected emissive mask strip (headlights, windows, neon).
 
 ## Viewer
 
-`--html` writes a standalone page: turntable, slice scan, exploded view, drag to orbit, 16-direction PNG export. `skills/sprite-stacking/scripts/viewer.html` also opens on its own and takes a dropped slice strip.
+`--html` writes a standalone page: turntable, slice scan, exploded view, **Play** mode (**Drive** with WASD/arrows + drift, **Wind** sway, **Shatter** & rebuild), live **Time of Day** (Day → Sunset → Night with auto-emissive glow and light pools), draggable sun (`Shift+drag`) with projected 3D shadows, and 16-direction PNG export. `skills/sprite-stacking/scripts/viewer.html` also opens on its own and takes a dropped slice strip.
 
 ## Requirements
 
