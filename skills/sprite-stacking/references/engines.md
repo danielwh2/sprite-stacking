@@ -73,3 +73,14 @@ One child `SpriteRenderer` per slice with ascending sorting order, Point filter 
 ## Phaser, Pygame, anything else
 
 The same loop: rotate each slice around its centre, scale y by `squash`, lift by `-round(z * spacing)`, nearest filter.
+
+## Spherical bodies & world-space terminator lighting
+
+Under orthographic pitch `squash` and vertical slice lift `spacing`, a sphere with horizontal radius `R_xy` projects to an exact circle only when its vertical slice half-height satisfies the Cauchy-Schwarz envelope:
+
+```ts
+// Vertical half-height in slices so the projected silhouette is circular
+const R_z = (R_xy * Math.sqrt(1 - squash * squash)) / spacing;
+```
+
+For rotating planets or moons, keep the strip in pure albedo (cloud bands, storms, craters) and evaluate `dot(normal, sunDir)` in world space when blitting each slice so the surface rotates smoothly through a fixed day/night terminator. For planetary rings, draw back-half particles (`y_local < 0`) before the planet stack, front-half particles (`y_local >= 0`) after, and darken particles inside the cylindrical shadow cone cast away from `sunDir`.
