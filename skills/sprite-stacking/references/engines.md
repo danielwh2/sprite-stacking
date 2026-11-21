@@ -4,7 +4,7 @@ All of these run the loop from SKILL.md step 3: rotate each slice around its cen
 
 ## Web (Canvas 2D, React)
 
-For a crisp outer outline, render into an offscreen canvas at 1x art-pixel size, outline its alpha once, then draw it onto the display canvas at an integer scale (`4`, `6`, etc.) with `imageSmoothingEnabled = false`. In software pixel-buffer rasterizers, rotate around symmetric centres `(w - 1) * 0.5, (h - 1) * 0.5` with `Math.round(...)` nearest sampling to avoid 0.5-art-px rotational drift across 90° turns. For smooth 60 fps animation (bobbing, orbiting, child props on a spinning parent), keep positions in continuous screen-space floats and round only once at the final 1-screen-pixel `drawImage` destination (`Math.round(dx), Math.round(dy)`). Animate grounded prop entrances bottom-to-top via per-slice `lifts` rather than mid-air opacity fades, and validate `sheet.width % count === 0` at load time. `scripts/viewer.html` implements the full reference pipeline, plus orbit, slice scan, exploded view and 16-direction export.
+For a crisp outer outline, render into an offscreen canvas at 1x art-pixel size, outline its alpha once, then draw it onto the display canvas at an integer scale (`4`, `6`, etc.) with `imageSmoothingEnabled = false`. In software pixel-buffer rasterizers, rotate around symmetric centres `(w - 1) * 0.5, (h - 1) * 0.5` with `Math.round(...)` nearest sampling to avoid 0.5-art-px rotational drift across 90° turns. For smooth 60 fps animation (bobbing, orbiting, child props on a spinning parent), keep positions in continuous screen-space floats and round only once at the final 1-screen-pixel `drawImage` destination (`Math.round(dx), Math.round(dy)`). Animate grounded prop entrances bottom-to-top via per-slice `lifts` (extending the reveal frontier past `count` by the blend width so top slices finish easing before returning `null`), add per-slice lateral `xOffsets` scaled by `(z / (count - 1))²` for anchored swaying props like kelp or banners, and apply per-slice `(xOffsets, yOffsets)` proportional to `(z - centerZ) * sin(pitchAngle)` for 3D pitch/roll tilt on leaping creatures or rolling hulls. Validate `sheet.width % count === 0` at load time, verify each strip's native nose axis (`+x`, `+y`, or `-y`) before computing `turn` from velocity, and depth-tint submerged stacks toward the water hue (omitting hard outlines) so surface and underwater layers separate cleanly. `scripts/viewer.html` implements the full reference pipeline, plus orbit, slice scan, exploded view and 16-direction export.
 
 Without an outline, draw straight to the canvas:
 
@@ -21,14 +21,12 @@ function drawStack(
 ) {
   const w = sheet.width / count;
   const h = sheet.height;
-  const ox = -Math.floor(w / 2);
-  const oy = -Math.floor(h / 2);
-  const px = Math.round(x);
-  const py = Math.round(y);
+  const ox = -(w - 1) * 0.5;
+  const oy = -(h - 1) * 0.5;
   ctx.imageSmoothingEnabled = false;
   for (let z = 0; z < count; z++) {
     ctx.save();
-    ctx.translate(px, py - Math.round(z * spacing));
+    ctx.translate(Math.round(x), Math.round(y - z * spacing));
     ctx.scale(1, squash);
     ctx.rotate(turn);
     ctx.drawImage(sheet, z * w, 0, w, h, ox, oy, w, h);
