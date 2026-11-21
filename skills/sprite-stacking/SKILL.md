@@ -119,7 +119,8 @@ Do not guess these:
 - **Heading:** the sheet's front points down (+y), so `turn = atan2(vy, vx) - PI / 2`. For anything that reverses, drive `turn` from a stored heading, not raw velocity.
 - **Y-sort whole stacks by ground point.** Never interleave slices of two objects.
 - **Bake static stacks** into plain sprites at load time. 200 trees × 30 slices is 6,000 draws a frame.
-- **Animate entrances with slices, not opacity fades.** Fading a stack in mid-air looks flat; grow grounded props bottom-to-top via per-slice `lifts` (slice-bloom with a gentle spring settle and ground ring), and glide airborne/waterborne stacks (clouds, boats) in along their travel arc. Never blur crisp stacks with `defocus` cuts in video — use continuous camera moves instead.
+- **Animate entrances with slices, not opacity fades.** Fading a stack in mid-air looks flat; grow grounded props bottom-to-top via per-slice `lifts` (slice-bloom with a gentle spring settle and ground ring), and glide airborne/waterborne stacks (clouds, boats) in along their travel arc. Extend the `lifts` reveal frontier past `count` by the per-slice blend width (`mix(start, count + width, ...)`) so the top slices reach full `spacing` before switching `lifts` back to `null` — otherwise the upper slices snap in a single frame. Never blur crisp stacks with `defocus` cuts in video — use continuous camera moves instead.
+- **Organic sway via per-slice lateral shear (`xOffsets`).** For anchored flexible props (kelp, grass, banners, trees), offset each slice horizontally by `sin(t * freq - z * wave + phase) * amp * (z / (count - 1))²` inside the stack loop. Base slices (`z = 0`) stay pinned to the ground while tips sway smoothly at 60 fps with zero extra strips and zero blur.
 
 Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or Phaser. `scripts/viewer.html` is the complete web reference: buffer, outline, orbit, scan, exploded, export.
 
@@ -150,4 +151,5 @@ When a stack comes out wrong, fix it, then fix the cause where it can't recur: c
 | 2026-11-20 | Tiny 12–24px props scaled 7–9× on 1080p video look overly chunky and exaggerate nearest-neighbor rotation stepping | Build denser strips (36–56 slices, 30–148px) and render at 4–6× integer scale for showcase video | Rule |
 | 2026-11-20 | Updating a strip's slice count without updating the loader's count silently slices mid-frame | Validate `sheet.width % count === 0` and slice width at load time | Rule |
 | 2026-11-20 | Fading stacks in mid-air or using `defocus` cuts blurs/flattens pixel-art dioramas | Bloom grounded props bottom-to-top via per-slice `lifts`, glide orbiters in along their arc, and use continuous camera moves | Rule |
+| 2026-11-20 | Stopping a `lifts` reveal frontier at `count` leaves upper slices compressed when switching back to `null`, causing a single-frame top-slice jump | Extend the reveal frontier past `count` by the per-slice blend width (`count + width`) so top slices reach `1.0` before returning `null` | Rule |
 
