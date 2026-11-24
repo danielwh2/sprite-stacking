@@ -32,6 +32,8 @@ Pick a tier:
 
 Choose density from the **closest shot**, not the output file's dimensions. A 50 px hull enlarged to 450 px still has 50 px of design. If a feature cannot be drawn as a connected shape (e.g. a canopy with a frame), redraw the source with room for it or choose a closer composition; don't sharpen or blur an enlargement. Show scale through features of known size: windows → hatch → module → array.
 
+Draw the part that *does* the action. A nozzle needs a lip and opening, a moving panel needs a fixed hinge, a wheel needs a contact patch. Mark the local attachment point and axis when authoring the strip; use that same pivot to place the effect or child part when the stack turns. Apply this to the receiving object too: if two pieces latch, design both mating surfaces. Spend detail there before adding bolts elsewhere.
+
 Then take the first source that applies.
 
 **a. You have an image generation tool.** Use this prompt. Swap the subject, keep the rest verbatim:
@@ -129,10 +131,17 @@ Do not guess these:
 
 Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or Phaser. `scripts/viewer.html` is the complete web reference: buffer, outline, orbit, scan, exploded, export.
 
+### When motion leaves a trace
+
+Pick a trace the material and medium actually support (spray leaving a paddle, dust at a tire, gas leaving a thruster). A still object may need none. Use the same physical event to drive the sprite and its effect: a spacecraft speeds up opposite the expelled gas, then coasts when the valve closes. A turn under torque changes angular velocity; it need not change the center's path.
+
+Emit at the port's **pose at birth**, not its position this frame. Give each packet the port's world velocity (including rotation about the pivot) plus its exit velocity. After release, apply only forces from the medium; don't drag the old trail with the sprite or camera. Seed birth times/directions once, or bake the simulation so scrubbing backwards gives the same frame. Group the particles into a readable shape near the source; let them separate as they travel. More isolated bright dots rarely make a better effect.
+
 ## 4. Done when
 
 - [ ] **Delivery-size read:** inspect the closest shot, widest shot and darkest lighting in the *finished composition*, both at native resolution and at the intended viewing width (e.g. 390 px for a phone feed). Without labels, can you identify the subject, its facing direction and the important action/contact? If not, separate silhouettes, change framing or group values before adding detail.
 - [ ] **Clean materials in motion:** play through a slow move at delivery size. Keep hull panels, seams and reflections in coherent clusters; if isolated bright pixels crawl like grit, simplify the material or smooth the *normals*, not the final image. Reserve the strongest contrast for functional landmarks. For orbital scenes, a quiet sky and a thin lit limb can sell distance better than full-frame stars or dither. This is a readability test, not a required style or shot sequence.
+- [ ] **Cause and response (if animated):** compare three feed-sized frames: before force/contact, during it, and just after release. Is the source attached at two different headings? Do the subject, the material it sheds and the object it touches respond in the right directions? Check one frame by seeking back to it; neither the attachment nor the trail should jump.
 - [ ] **Straight down:** at `squash = 1`, `turn = 0`, the render is one slice wide and `sliceHeight + count - 1` px tall.
 - [ ] **Pitch and 90°:** 0.75 is visibly shorter than 1.0; at 90° the width equals `sliceHeight`.
 - [ ] **Spacing:** 0 draws flat (top slice only), 2.5 separates every layer cleanly.
