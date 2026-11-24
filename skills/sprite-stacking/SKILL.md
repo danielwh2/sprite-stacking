@@ -30,6 +30,8 @@ Pick a tier:
 - **Detailed hi-bit:** 26-44 slices, 36×72 to 46×107 px. Holds vents, logos, spoked rims, glass reflections, raised spoilers.
 - **Showcase / 1080p video:** 36-56 slices, 30×30 to 148×148 px, shown at 4-6x integer scale. Avoids chunky silhouette stepping and rotational wobble when tiny sprites are blown up to 7-9x on HD video. Architectural micro-details that read cleanly across 360° (shutters, flower boxes, balcony railings, roof moss, lily pads, lantern posts, cliff tendrils, waterfalls) elevate dioramas without breaking palette discipline.
 
+Choose density from the **closest shot**, not the output file's dimensions. A 50 px hull enlarged to 450 px still has 50 px of design. If a feature cannot be drawn as a connected shape (e.g. a canopy with a frame), redraw the source with room for it or choose a closer composition; don't sharpen or blur an enlargement. Show scale through features of known size: windows → hatch → module → array.
+
 Then take the first source that applies.
 
 **a. You have an image generation tool.** Use this prompt. Swap the subject, keep the rest verbatim:
@@ -129,6 +131,8 @@ Open `references/engines.md` when wiring into web Canvas, React, Godot, Unity or
 
 ## 4. Done when
 
+- [ ] **Delivery-size read:** inspect the closest shot, widest shot and darkest lighting in the *finished composition*, both at native resolution and at the intended viewing width (e.g. 390 px for a phone feed). Without labels, can you identify the subject, its facing direction and the important action/contact? If not, separate silhouettes, change framing or group values before adding detail.
+- [ ] **Clean materials in motion:** play through a slow move at delivery size. Keep hull panels, seams and reflections in coherent clusters; if isolated bright pixels crawl like grit, simplify the material or smooth the *normals*, not the final image. Reserve the strongest contrast for functional landmarks. For orbital scenes, a quiet sky and a thin lit limb can sell distance better than full-frame stars or dither. This is a readability test, not a required style or shot sequence.
 - [ ] **Straight down:** at `squash = 1`, `turn = 0`, the render is one slice wide and `sliceHeight + count - 1` px tall.
 - [ ] **Pitch and 90°:** 0.75 is visibly shorter than 1.0; at 90° the width equals `sliceHeight`.
 - [ ] **Spacing:** 0 draws flat (top slice only), 2.5 separates every layer cleanly.
@@ -161,4 +165,3 @@ When a stack comes out wrong, fix it, then fix the cause where it can't recur: c
 | 2026-11-21 | Equal-radius spheres (`R_z = R_xy`) stretch vertically into eggs under pitch `squash` and slice `spacing` | Compensate sphere slice half-height with Cauchy-Schwarz projection `R_z = R_xy · √(1 − squash²) / spacing` | Rule |
 | 2026-11-21 | Baking directional sun shading into rotating planet or moon strips makes the day/night shadow spin with the surface | Store pure albedo in spherical strips and evaluate world-space directional terminator shading per slice at render time | Rule |
 | 2026-11-21 | Drawing planetary rings in a single pass causes rings to float completely in front of or behind a stacked planet | Split planar ring particles into back (`y_local < 0`) before the stack and front (`y_local >= 0`) after, and eclipse particles in the cylindrical shadow cone | Rule |
-
